@@ -1,0 +1,11 @@
+current_time: 2026-05-14 09:58:35.189969,total_time: 0:09:58.289972, Epoch 30,epoch_time: 26.457s, Loss 6.4655
+current_time: 2026-05-14 10:00:41.092228,total_time: 0:12:04.192231, Epoch 40,epoch_time: 14.063s, Loss 6.4408
+current_time: 2026-05-14 10:03:35.919105,total_time: 0:14:59.019108, Epoch 50,epoch_time: 10.207s, Loss 6.4562
+current_time: 2026-05-14 10:05:49.065290,total_time: 0:17:12.165293, Epoch 60,epoch_time: 6.920s, Loss 6.4385
+current_time: 2026-05-14 10:07:56.181470,total_time: 0:19:19.281473, Epoch 70,epoch_time: 12.342s, Loss 6.4395
+current_time: 2026-05-14 10:10:37.192928,total_time: 0:22:00.292931, Epoch 80,epoch_time: 21.010s, Loss 6.3641
+current_time: 2026-05-14 10:13:04.827242,total_time: 0:24:27.927245, Epoch 90,epoch_time: 17.356s, Loss 6.4686
+current_time: 2026-05-14 10:15:50.806874,total_time: 0:27:13.906877, Epoch 100,epoch_time: 12.989s, Loss 6.3940
+current_time: 2026-05-14 10:19:34.772448,total_time: 0:30:57.872451, Epoch 110,epoch_time: 16.131s, Loss 6.3735
+current_time: 2026-05-14 10:22:08.294822,total_time: 0:33:31.394825, Epoch 120,epoch_time: 18.543s, Loss 6.5060
+current_time: 2026-05-14 10:25:06.979823,total_time: 0:36:30.079826, Epoch 130,epoch_time: 26.325s, Loss 6.4431

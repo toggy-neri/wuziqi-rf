@@ -1,0 +1,22 @@
+5.12
+修复了关于memory和game_history的bug：
+1.channel 函数使用了self而不是传入的参数
+2.undo没有回滚具体的 self.done 导致错误判断结束局面
+3.解决了policy的收敛问题
+
+5.13
+1.完成了人机对弈的ui设计
+2.生成了 alphaTao-v0.11
+3.完善了optimizer 棋盘四面旋转
+4.引入了噪声
+5.引入了虚拟loss
+6.针对mask and softmax batch 做了gpu优化
+7.增加了search回溯代码
+
+5.14
+1.增加了optimizer中的循环次数，充分利用数据
+2.尝试添加监督学习
+3.去掉了top，可能后续会加上 todo
+4.修复memory player value bug
+5.更改mask位置
+6.修复undo问题，直接将last_move设为none

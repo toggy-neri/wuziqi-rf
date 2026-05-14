@@ -1,0 +1,5 @@
+current_time: 2026-05-13 17:01:38.959472,total_time: 0:06:05.479543, Epoch 6,epoch_time: 55.163s, Loss 6.5947
+current_time: 2026-05-13 17:08:07.637978,total_time: 0:12:34.158049, Epoch 12,epoch_time: 58.843s, Loss 6.5858
+current_time: 2026-05-13 17:14:20.532673,total_time: 0:18:47.052744, Epoch 18,epoch_time: 52.114s, Loss 6.4591
+current_time: 2026-05-13 17:20:14.732665,total_time: 0:24:41.252736, Epoch 24,epoch_time: 66.689s, Loss 6.4359
+current_time: 2026-05-13 17:27:05.305889,total_time: 0:31:31.825960, Epoch 30,epoch_time: 68.702s, Loss 6.4385
