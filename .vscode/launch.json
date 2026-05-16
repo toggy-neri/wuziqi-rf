@@ -8,7 +8,7 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "args": ["test_overfit","--train"]
+            "args": ["alphaTao-v0.6","--train"]
             
         }
     ]

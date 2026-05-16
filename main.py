@@ -4,6 +4,7 @@ import argparse
 import time
 import yaml
 import os
+import pickle
 
 #chess GUI
 from wuziqi_gui import WuziqiGUI,AiMatch
@@ -60,6 +61,8 @@ class Agent:
         self.MODEL_FILE_RESTORE = os.path.join(self.restore_dir, f'{hyperparameters_set}.pt')
         self.LOG_FILE = os.path.join(self.restore_dir, f'{hyperparameters_set}.txt')
         self.LOG_FILE_OPTIMIZE = os.path.join(self.restore_dir, f'{hyperparameters_set}_optimize.txt')  
+
+        self.MEMORY_FILE = os.path.join(self.restore_dir, f'{self.exist_model_name}_memory.pkl') 
         os.makedirs(self.restore_dir, exist_ok=True)
         #self.GRAPH_FILE = os.path.join(self.run_dir, f'{hyperparameters_set}.png')
         
@@ -82,6 +85,12 @@ class Agent:
             resore_count = 0
             #store path of the mddel
             os.makedirs(self.run_dir, exist_ok=True)
+            if os.path.exists(self.MEMORY_FILE):
+                with open(self.MEMORY_FILE, 'rb') as f:
+                    memory = pickle.load(f)
+                print(f"Loaded memory with {len(memory)} samples")
+            else:
+                print("No memory file found, starting fresh")
         else:
             ai_match = AiMatch(env, self.network,self.search_num,self.inference_batch_size)
             ai_match.run()
@@ -120,12 +129,22 @@ class Agent:
                 #search the tree,return policy(15*15)
                 mcts.search(root,self.inference_batch_size,self.search_num,self.exploration_factor)
                 #t1 = time.time()
+                visit_board = np.zeros((self.board_size, self.board_size))
+                for action, child in root.children.items():
+                    row = action // self.board_size
+                    col = action % self.board_size
+                    visit_board[row, col] = child.visits
+                # print("\nRoot Children Visits:")
+                # print(visit_board)
+                # print(env.board)
                 policy = mcts.get_policy(root,self.board_size)
                 #choose the best move 
                 action,root = mcts.choose(root,is_training)
-
+                # print(f"action: {action}",f"row: {action // self.board_size},col: {action % self.board_size}")
+                if root.is_terminal:
+                    print("root is terminal")
                 #t2 = time.time()
-                root.parent = None
+                #root.parent = None
                 #step forward
                 state, reward, done, info = env.step(action)  
                 #store the game history
@@ -139,14 +158,13 @@ class Agent:
                 #print(env.board)
                 #
                 if done:
-
                     winner = info["winner"]
-
+                    
                     for s,p,player,last_move in game_history:  #注意不要保证重名
                         #print(s)
                         value = 1 if player == winner else -1
-                        ch_state = env.get_channel_state(s,last_move,player)
-                        print(f"Policy Max Prob: {np.max(p):.4f}, Non-zero actions: {np.count_nonzero(p)}")
+                        ch_state = env.get_channel_state(s,player)
+                        #print(f"Policy Max Prob: {np.max(p):.4f}, Non-zero actions: {np.count_nonzero(p)}")
                         memory.append((ch_state, p,value))
                         # if len(memory) >= self.replay_memory_size:
                         #     self.optimize(memory, self.optimizer_batch_size)
@@ -179,6 +197,11 @@ class Agent:
                     with open(self.LOG_FILE, 'a') as f:
                         f.write(f"current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Loss {total_loss:.4f}\n")
                         torch.save(self.network.state_dict(), self.MODEL_FILE_RESTORE)
+                    
+
+                    with open(self.MEMORY_FILE, 'wb') as f:
+                        pickle.dump(memory, f)
+
                    #optimize the network
 
     #optimize the network
@@ -215,45 +238,75 @@ class Agent:
             actions = np.array(actions)  # (B, 225)
             values = np.array(values)    # (B,)
 
-            # # 旋转增强：对每个样本生成4个旋转版本
-            # aug_states = []
-            # aug_actions = []
-            # aug_values = []
+            # 旋转增强：对每个样本生成4个旋转版本
+            aug_states = []
+            aug_actions = []
+            aug_values = []
 
-            # for k in range(4):  # k=0,1,2,3 对应 0°,90°,180°,270°
-            #     # 旋转棋盘：state的后两个维度是棋盘(H,W)，对axis=(2,3)旋转
-            #     rotated_states = np.rot90(states, k=k, axes=(2, 3)).copy()
+            for k in range(4):  # k=0,1,2,3 对应 0°,90°,180°,270°
+                # 旋转棋盘：state的后两个维度是棋盘(H,W)，对axis=(2,3)旋转
+                rotated_states = np.rot90(states, k=k, axes=(2, 3)).copy()
 
-            #     # policy也要跟着旋转：先reshape成棋盘形状，旋转，再展平
-            #     rotated_actions = actions.reshape(-1, self.board_size, self.board_size)
-            #     rotated_actions = np.rot90(rotated_actions, k=k, axes=(1, 2)).copy()
-            #     rotated_actions = rotated_actions.reshape(-1, self.board_size * self.board_size)
+                # policy也要跟着旋转：先reshape成棋盘形状，旋转，再展平
+                rotated_actions = actions.reshape(-1, self.board_size, self.board_size)
+                rotated_actions = np.rot90(rotated_actions, k=k, axes=(1, 2)).copy()
+                rotated_actions = rotated_actions.reshape(-1, self.board_size * self.board_size)
 
-            #     aug_states.append(rotated_states)
-            #     aug_actions.append(rotated_actions)
-            #     aug_values.append(values)
+                aug_states.append(rotated_states)
+                aug_actions.append(rotated_actions)
+                aug_values.append(values)
 
-            # # 拼接成 4*B 的大batch
-            # aug_states  = np.concatenate(aug_states,  axis=0)
-            # aug_actions = np.concatenate(aug_actions, axis=0)
-            # aug_values  = np.concatenate(aug_values,  axis=0)
+            # 拼接成 4*B 的大batch
+            aug_states  = np.concatenate(aug_states,  axis=0)
+            aug_actions = np.concatenate(aug_actions, axis=0)
+            aug_values  = np.concatenate(aug_values,  axis=0)
 
-            # batch_states  = torch.FloatTensor(aug_states).to(device)
-            # batch_actions = torch.FloatTensor(aug_actions).to(device)
-            # batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
-            batch_states  = torch.FloatTensor(states).to(device)
-            batch_actions = torch.FloatTensor(actions).to(device)
-            batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
+            batch_states  = torch.FloatTensor(aug_states).to(device)
+            batch_actions = torch.FloatTensor(aug_actions).to(device)
+            batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
+            # batch_states  = torch.FloatTensor(states).to(device)
+            # batch_actions = torch.FloatTensor(actions).to(device)
+            # batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
             p_logits, v = self.network(batch_states)
             print(f"v mean: {v.mean().item():.3f}, std: {v.std().item():.3f}")
-            print(f"target mean: {batch_values.mean().item():.3f}, std: {batch_values.std().item():.3f}")
+            print(f"V 预测值样例: {v[:5].detach().cpu().numpy().flatten()}") # 打印前5个预测值
+            print(f"V 真实值样例: {batch_values[:5].cpu().numpy().flatten()}")
 
-            value_loss  = F.mse_loss(v, batch_values)
-            log_p       = F.log_softmax(p_logits, dim=1)
-            policy_loss = -torch.mean(torch.sum(batch_actions * log_p, dim=1))
+            value_loss = F.mse_loss(v, batch_values)
 
+            # policy cross entropy
+            log_p = F.log_softmax(p_logits, dim=1)
+
+            policy_loss = -torch.mean(
+                torch.sum(batch_actions * log_p, dim=1)
+            )
+
+            # =========================
+            # entropy monitoring
+            # =========================
+            with torch.no_grad():
+
+                # network policy probs
+                pred_probs = F.softmax(p_logits, dim=1)
+
+                # network entropy
+                pred_entropy = -(
+                    pred_probs * torch.log(pred_probs + 1e-10)
+                ).sum(dim=1).mean()
+
+                # MCTS target entropy
+                target_entropy = -(
+                    batch_actions * torch.log(batch_actions + 1e-10)
+                ).sum(dim=1).mean()
+
+            print(
+                f"policy_loss={policy_loss.item():.4f} "
+                f"value_loss={value_loss.item():.4f} "
+                f"pred_entropy={pred_entropy.item():.4f} "
+                f"target_entropy={target_entropy.item():.4f}"
+            )
             total_loss = 5 * value_loss + policy_loss
-            print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
+            #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
 
             self.optimizer.zero_grad()
             total_loss.backward()

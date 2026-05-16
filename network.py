@@ -19,12 +19,12 @@ class Residual_block(nn.Module):
         return F.relu(out)
     
 class Network(nn.Module):
-    def __init__(self,board_size = 15,num_res_blocks = 10):
+    def __init__(self,board_size = 15,num_res_blocks = 10,channels = 8):
         super(Network, self).__init__()
 
         self.board_size = board_size   
         #init conv block
-        self.conv_input = nn.Conv2d(4, 64, kernel_size=3, padding=1)
+        self.conv_input = nn.Conv2d(channels, 64, kernel_size=3, padding=1)
         self.bn_input = nn.BatchNorm2d(64)
 
         #residual blocks tower
@@ -65,4 +65,34 @@ class Network(nn.Module):
         # v = self.value_fc2(v)   
 
         return p, v
+    
+def upgrade_input_channels(model_path, new_model_path, old_channels=4, new_channels=8):
+    old_network = Network(board_size=15, channels=old_channels)
+    old_network.load_state_dict(torch.load(model_path))
+    
+    new_network = Network(board_size=15, channels=new_channels)
+    
+    # 复制除第一层以外的所有权重
+    old_state = old_network.state_dict()
+    new_state = new_network.state_dict()
+    
+    for key in old_state:
+        if key == 'conv_input.weight':
+            # 旧权重 shape: (64, 4, 3, 3)
+            # 新权重 shape: (64, 8, 3, 3)
+            old_w = old_state[key]  # (64, 4, 3, 3)
+            new_w = new_state[key]  # (64, 8, 3, 3)
+            # 前4个通道用旧权重，后4个通道用随机初始化（缩小scale避免噪声过大）
+            new_w[:, :old_channels, :, :] = old_w
+            new_w[:, old_channels:, :, :] *= 0.1  # 缩小新通道初始权重
+            new_state[key] = new_w
+        else:
+            new_state[key] = old_state[key]
+    
+    new_network.load_state_dict(new_state)
+    torch.save(new_network.state_dict(), new_model_path)
+    print(f"Saved upgraded model to {new_model_path}")
+    return new_network
 
+if __name__ == '__main__':
+    upgrade_input_channels('runs/alphaTao-v0.5/alphaTao-v0.5.pt', 'runs/alphaTao-v0.5/alphaTao-v0.6.pt',4,8)

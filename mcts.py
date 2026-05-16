@@ -56,7 +56,8 @@ class MCTS():
             leaf_nodes = []
             leaf_states = []
             paths = []
-
+            terminal_dones = []
+            terminal_values = []
             #depth first search the tree
 
             for _ in range(batch_size):
@@ -66,21 +67,26 @@ class MCTS():
                 #t0 = time.time()
                 path = [cur_node]
                 #new_state = state.copy()
+                v_terminal = None
+                done = False
 
-
+                
                 #expand the tree
                 
-                while cur_node.is_visited and not cur_node.is_terminal:
+                while cur_node.is_visited :
                     action, next_node = self.get_best_child(
                         cur_node,
                         self.env.board,
                         exploration_factor
                     )
-
+                    if next_node is None:
+                        break
                     board_before = self.env.board.copy()
 
                     _, reward, done, info = self.env.step(action)
-
+                    if done:
+                        v_terminal = 1 if info["winner"] == -self.env.current_player else -1
+                        break
                     if info.get("invalid_move", False):
 
                         print("INVALID:", action)
@@ -89,23 +95,21 @@ class MCTS():
 
                         # 不更新 node
                         continue
+                    
 
                     # ✔ valid move 才前进
                     cur_node = next_node
                     path.append(cur_node)
                     path_len += 1
 
-                done, winner = self.env._check_win(self.env.last_move)
-                v_terminal = None
+                #done, winner = self.env._check_win(self.env.last_move)
 
-                if done:
-                    cur_node.is_terminal = True
-                    v_terminal = 1 if winner == self.env.current_player else -1
-                    
+                terminal_dones.append(done)
+                terminal_values.append(v_terminal)    
 
 
                 leaf_nodes.append(cur_node)
-                leaf_states.append((self.env.board.copy(),self.env.last_move,-self.env.current_player))
+                leaf_states.append((self.env.board.copy(),-self.env.current_player))
                 paths.append(path)
 
                 for _ in range(path_len):
@@ -123,7 +127,7 @@ class MCTS():
                 
             #t1 = time.time()
 
-            states_np = np.stack([self.env.get_channel_state(board,last_move,current_player) for board,last_move,current_player in leaf_states])
+            states_np = np.stack([self.env.get_channel_state(board,current_player) for board,current_player in leaf_states])
             inputs = torch.from_numpy(states_np).to(device, non_blocking=True).float()
             #inputs = torch.stack([torch.tensor(s.get_channel_state(s.board)) for s in leaf_states]).to(device)
             #done,winner = state._check_win(state.last_move)
@@ -134,11 +138,12 @@ class MCTS():
             #print(f"树搜索+copy: {t1-t0:.3f}s  |  网络推理: {t2-t1:.3f}s")
             #ta = time.time()
             # 从 leaf_states 提取 board 数组
-            boards = np.stack([s for s,_,_ in leaf_states])  # (batch_size, 15, 15)
+            boards = np.stack([s for s,_ in leaf_states])  # (batch_size, 15, 15)
             probs = self.mask_and_softmax_batch(policy)
             #tb = time.time()
             probs = probs.cpu().numpy()
-
+            if(len(probs) == 0):
+                raise ValueError("probs is empty")
             # top_probs,top_actions = torch.topk(probs,30,dim =1 )
             # top_probs = top_probs.cpu().numpy()
             # top_actions = top_actions.cpu().numpy()
@@ -151,10 +156,17 @@ class MCTS():
             for i,(leaf,path) in enumerate(zip(leaf_nodes,paths)):
                 #ta = time.time()
                 #get the top n moves
-                real_v = v_terminal if (path[-1].is_terminal and v_terminal is not None) else v[i].item()
+                if terminal_dones[i]:
+                    real_v = terminal_values[i]
+                else:
+                    real_v = v[i].item()
                 #tb = time.time()
                 leaf.actions = np.arange(probs.shape[1])   # 所有动作索引
                 leaf.probs = probs[i]                      # 对应概率
+                if(len(leaf.actions) == 0):
+                    raise ValueError("leaf.actions is empty")
+                #print(leaf.actions)
+                #print(leaf.probs)
                 # #update the p_dict
                 # leaf.actions = top_actions[i]
                 # leaf.probs = top_probs[i]
@@ -188,6 +200,7 @@ class MCTS():
                 #scoreprint(f"  action={action}, visits={child.visits}, score={child.score:.3f}, Q={child.score/max(child.visits,1):.3f}")
                 p[action] = child.visits
             sum_visits = p.sum()
+            #print(p)
             if sum_visits > 0:
                 p = p / sum_visits
 
@@ -205,8 +218,10 @@ class MCTS():
             node.visits += 1
             node.score += score
             score = -score
-            if node.is_terminal:
-                node.is_terminal = False
+            # if node.is_terminal:
+            #     continue
+            # if node.is_terminal:
+            #     node.is_terminal = False
 
     def choose(self,root_node,is_training):
         actions = []
@@ -215,7 +230,8 @@ class MCTS():
         for action,child in root_node.children.items():
             actions.append(action)
             visits.append(child.visits)
-
+        if(len(actions) == 0):
+            raise ValueError("actions is empty")
         if not is_training:
             best_action = np.argmax(visits)
             action = actions[best_action]
@@ -273,12 +289,11 @@ class MCTS():
             node.children[a].score if a in node.children else 0
             for a in legal_actions
         ])
-
+        #print(ss)
         # PUCT
         q = np.where(vs > 0, ss / (vs + 1e-6), 0.0)
-
         u = c_puct * legal_ps * (
-            np.sqrt(node.visits + 1e-8) / (1.0 + vs)
+            np.sqrt(max(node.visits,0) + 1e-8) / (1.0 + vs)
         )
 
         scores = q + u
@@ -296,7 +311,7 @@ class MCTS():
 
         child = node.children[best_action]
 
-        # virtual loss
+       # virtual loss
         v_loss = 1
 
         child.visits += v_loss
