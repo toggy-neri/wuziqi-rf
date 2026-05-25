@@ -122,7 +122,33 @@ class Agent:
         if not self.is_self_play:
             minimax = Minimax(self.board_size)
         
-        self.optimizer = torch.optim.AdamW(self.network.parameters(), lr=self.lr,weight_decay=1e-4)#此处更换
+        self.optimizer = torch.optim.AdamW([
+    # 主干网络（共享部分）
+    {
+        "params": list(self.network.conv_input.parameters()) +
+                  list(self.network.bn_input.parameters()) +
+                  list(self.network.residual_blocks.parameters()),
+        "lr": self.lr
+    },
+
+    # policy head
+    {
+        "params": list(self.network.policy_head.parameters()) +
+                  list(self.network.bn_policy.parameters()) +
+                  list(self.network.policy_fc.parameters()),
+        "lr": self.lr
+    },
+
+    # value head
+    {
+        "params": list(self.network.value_head.parameters()) +
+                  list(self.network.bn_value.parameters()) +
+                  list(self.network.value_fc1.parameters()) +
+                  list(self.network.value_fc2.parameters()),
+        "lr": self.lr * 10
+    }
+
+], weight_decay=1e-4)
 
 
         #create mcts
@@ -363,7 +389,7 @@ class Agent:
             batch_states  = torch.FloatTensor(aug_states).to(device)
             batch_actions = torch.FloatTensor(aug_actions).to(device)
             batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
-            
+
             # states = np.array(states)    # (B, 4, 15, 15)
             # actions = np.array(actions)  # (B, 225)
             # values = np.array(values)    # (B,)
