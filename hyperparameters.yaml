@@ -19,8 +19,8 @@ alphaTao-v0.9:
   search_num: 400
   is_continue_training: true
   is_muti_optimizer: true
-  num_optimizer: 5
-  lr: 0.01
+  num_optimizer: 2
+  lr: 0.001
 alphaTao-v0.4-run:
   is_training: false
   optimizer_batch_size: 64

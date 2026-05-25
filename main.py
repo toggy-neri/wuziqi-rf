@@ -333,58 +333,59 @@ class Agent:
 
                 # with open(self.LOG_FILE_OPTIMIZE, 'a', encoding='utf-8') as f:
                 #     f.write(log_text)
-            # states = np.array(states)    # (B, 4, 15, 15)
-            # actions = np.array(actions)  # (B, 225)
-            # values = np.array(values)    # (B,)
-
-            # # 旋转增强：对每个样本生成4个旋转版本
-            # aug_states = []
-            # aug_actions = []
-            # # aug_values = []
-
-            # for k in range(4):  # k=0,1,2,3 对应 0°,90°,180°,270°
-            #     # 旋转棋盘：state的后两个维度是棋盘(H,W)，对axis=(2,3)旋转
-            #     rotated_states = np.rot90(states, k=k, axes=(2, 3)).copy()
-
-            #     # policy也要跟着旋转：先reshape成棋盘形状，旋转，再展平
-            #     rotated_actions = actions.reshape(-1, self.board_size, self.board_size)
-            #     rotated_actions = np.rot90(rotated_actions, k=k, axes=(1, 2)).copy()
-            #     rotated_actions = rotated_actions.reshape(-1, self.board_size * self.board_size)
-
-            #     aug_states.append(rotated_states)
-            #     aug_actions.append(rotated_actions)
-            #     # aug_values.append(values)
-
-            # # 拼接成 4*B 的大batch
-            # aug_states  = np.concatenate(aug_states,  axis=0)
-            # aug_actions = np.concatenate(aug_actions, axis=0)
-            # # aug_values  = np.concatenate(aug_values,  axis=0)
-
-            # batch_states  = torch.FloatTensor(aug_states).to(device)
-            # batch_actions = torch.FloatTensor(aug_actions).to(device)
-            # batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
             states = np.array(states)    # (B, 4, 15, 15)
             actions = np.array(actions)  # (B, 225)
             values = np.array(values)    # (B,)
 
-            # ================= 修改：随机旋转增强 =================
-            # 每次只随机选一种旋转（0°, 90°, 180°, 270°），不要拼接！
-            k = np.random.randint(0, 4) 
-            
-            # 旋转棋盘
-            aug_states = np.rot90(states, k=k, axes=(2, 3)).copy()
+            # 旋转增强：对每个样本生成4个旋转版本
+            aug_states = []
+            aug_actions = []
+            # aug_values = []
 
-            # policy跟着旋转
-            aug_actions = actions.reshape(-1, self.board_size, self.board_size)
-            aug_actions = np.rot90(aug_actions, k=k, axes=(1, 2)).copy()
-            aug_actions = aug_actions.reshape(-1, self.board_size * self.board_size)
+            for k in range(4):  # k=0,1,2,3 对应 0°,90°,180°,270°
+                # 旋转棋盘：state的后两个维度是棋盘(H,W)，对axis=(2,3)旋转
+                rotated_states = np.rot90(states, k=k, axes=(2, 3)).copy()
 
-            aug_values = values # Value 不变，因为只是视角旋转，胜负归属不变
-            # ========================================================
+                # policy也要跟着旋转：先reshape成棋盘形状，旋转，再展平
+                rotated_actions = actions.reshape(-1, self.board_size, self.board_size)
+                rotated_actions = np.rot90(rotated_actions, k=k, axes=(1, 2)).copy()
+                rotated_actions = rotated_actions.reshape(-1, self.board_size * self.board_size)
+
+                aug_states.append(rotated_states)
+                aug_actions.append(rotated_actions)
+                # aug_values.append(values)
+
+            # 拼接成 4*B 的大batch
+            aug_states  = np.concatenate(aug_states,  axis=0)
+            aug_actions = np.concatenate(aug_actions, axis=0)
+            # aug_values  = np.concatenate(aug_values,  axis=0)
 
             batch_states  = torch.FloatTensor(aug_states).to(device)
             batch_actions = torch.FloatTensor(aug_actions).to(device)
-            batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
+            batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
+            
+            # states = np.array(states)    # (B, 4, 15, 15)
+            # actions = np.array(actions)  # (B, 225)
+            # values = np.array(values)    # (B,)
+
+            # # ================= 修改：随机旋转增强 =================
+            # # 每次只随机选一种旋转（0°, 90°, 180°, 270°），不要拼接！
+            # k = np.random.randint(0, 4) 
+            
+            # # 旋转棋盘
+            # aug_states = np.rot90(states, k=k, axes=(2, 3)).copy()
+
+            # # policy跟着旋转
+            # aug_actions = actions.reshape(-1, self.board_size, self.board_size)
+            # aug_actions = np.rot90(aug_actions, k=k, axes=(1, 2)).copy()
+            # aug_actions = aug_actions.reshape(-1, self.board_size * self.board_size)
+
+            # aug_values = values # Value 不变，因为只是视角旋转，胜负归属不变
+            # # ========================================================
+
+            # batch_states  = torch.FloatTensor(aug_states).to(device)
+            # batch_actions = torch.FloatTensor(aug_actions).to(device)
+            # batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
 
 
             # batch_states  = torch.FloatTensor(states).to(device)
