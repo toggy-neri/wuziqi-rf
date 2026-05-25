@@ -8,9 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
-
 *.pkl
 *.pt
-*.log
 *.txt
+*.log
+
 runs/
