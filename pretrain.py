@@ -176,7 +176,7 @@ class pretrainer:
                         #f"tar_H={target_entropy.item():.4f} | "
                         f"illegal={illegal_prob_sum.item():.4f} | "
                         f"Top5_Hit={hit.item():.3f} | "       # 新指标
-                        f"Tar_Prob={target_probs.item():.3f}"  # 新指标
+                        f"Tar_Prob={target_probs.item():.3f} | "  # 新指标
                         # 打印动作数量
                         f"pred_cnt={pred_nonzero_counts.item():.1f} | "
                         #f"tar_cnt={target_nonzero_counts.item():.1f} | "
@@ -230,7 +230,7 @@ class pretrainer:
                     print(f"pretrain step {step:4d} | "
                         f"train_policy {policy_loss.item():.4f} | train_value {value_loss.item():.4f} | "
                         f"val_policy {val_policy_loss:.4f} | val_value {val_value_loss:.4f} | "
-                        f"acc {acc:.3f} | pred_entropy {pred_entropy.item():.4f} | illegal_prob_sum {illegal_prob_sum.item():.4f}")
+                        f" pred_entropy {pred_entropy.item():.4f} | illegal_prob_sum {illegal_prob_sum.item():.4f}")
 
                     with open(self.agent.LOG_FILE, 'a') as f:
                         f.write(f"current_time: {current_time}, total_time: {current_time-start_time}, "

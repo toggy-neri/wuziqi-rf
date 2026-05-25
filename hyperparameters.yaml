@@ -18,7 +18,7 @@ alphaTao-v0.9:
   warmup_steps: 0
   restore_epoch: 25
   search_num: 800
-  is_continue_training: false
+  is_continue_training: true
   is_muti_optimizer: true
   num_optimizer: 5
   lr: 0.00005
