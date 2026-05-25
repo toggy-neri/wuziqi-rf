@@ -8,17 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
-.pkl
-.pt
-.txt
-.log
+*.pkl
+*.pt
+*.txt
+*.log
 
 runs/
-basic_skill2.pkl
-basic_skill1.pkl
-basic_skill3.pkl
-basic_skill4.pkl
-minimax_data.pkl
-minimax_data1.pkl
-minimax_test.pkl
-standard1_dataset.pkl
