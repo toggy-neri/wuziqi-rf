@@ -294,32 +294,47 @@ class MCTS():
             # if node.is_terminal:
             #     node.is_terminal = False
 
-    def choose(self,root_node,is_training):
-        actions = []
-        visits = []
-        valid_mask = self.get_valid_mask(self.env.board, radius=2)
-        legal_children = {
-        a: child for a, child in root_node.children.items() 
-        if valid_mask[a] > 0
-        }
-        for action,child in legal_children.items():
-            actions.append(action)
-            visits.append(child.visits)
-        if(len(actions) == 0):
-            raise ValueError("actions is empty")
-        if not is_training:
-            best_action = np.argmax(visits)
-            action = actions[best_action]
-            return action,legal_children[action]
-        
-        else:
-            temperature = 0.5
-            visits = np.array(visits)
-            n_pow = np.power(visits, 1.0 / temperature)
-            probs = n_pow / np.sum(n_pow)
-            # 0 is pass
-        action = np.random.choice(actions, p=probs)
-        return action,legal_children[action]
+    def choose(self, root_node, is_training, current_step=0):
+            actions = []
+            visits = []
+            valid_mask = self.get_valid_mask(self.env.board, radius=2)
+            legal_children = {
+                a: child for a, child in root_node.children.items() 
+                if valid_mask[a] > 0
+            }
+            for action, child in legal_children.items():
+                actions.append(action)
+                visits.append(child.visits)
+                
+            if len(actions) == 0:
+                raise ValueError("actions is empty")
+                
+            visits = np.array(visits, dtype=np.float64)
+            
+            if not is_training:
+                # 测试/对战时：直接选访问次数最多的
+                best_action = np.argmax(visits)
+                return actions[best_action], legal_children[actions[best_action]]
+            
+            else:
+                # 训练时：使用标准温度策略
+                # 开局前 10 步 (可根据棋盘大小调整，15x15 推荐 10-15步)，使用 tau=1.0 鼓励探索
+                if current_step < 10:
+                    temperature = 1.0
+                else:
+                    # 10 步之后，使用极小的 tau (趋近于 0)，等价于 argmax，保证对局质量
+                    temperature = 1e-3 
+                
+                # 防止数值溢出
+                if temperature > 0.01:
+                    n_pow = np.power(visits + 1e-10, 1.0 / temperature)
+                    probs = n_pow / np.sum(n_pow)
+                    action = np.random.choice(actions, p=probs)
+                else:
+                    # tau 极小时，直接取 argmax
+                    action = actions[np.argmax(visits)]
+                    
+                return action, legal_children[action]
 
 
 
@@ -370,7 +385,7 @@ class MCTS():
 
     
     def get_best_child(self, node, board, is_root,c_puct=1.5):
-        c_puct = 2.0 if is_root else c_puct
+        c_puct = 3.0 if is_root else c_puct
     
         actions = node.actions
         ps = node.probs

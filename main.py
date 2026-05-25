@@ -147,6 +147,7 @@ class Agent:
             game_history = []
             state = env.reset()
             done = False
+            current_step = 0
             #flag = 0
             if not self.is_self_play:
                 import random
@@ -155,7 +156,7 @@ class Agent:
                 minimax_player = -ai_player
                 print(f"本局 AI执{'黑' if ai_player == 1 else '白'}，Minimax执{'黑' if minimax_player == 1 else '白'}")
             while not done:
-
+                current_step += 1
                 #flag += 1
                 current_time = datetime.now()
                 #print( f"Time: {current_time.strftime(DATE_FORMAT)}")
@@ -191,7 +192,7 @@ class Agent:
                         # print(env.board)
                         policy = mcts.get_policy(root,self.board_size)
                         #choose the best move 
-                        action,root = mcts.choose(root,is_training)
+                        action,root = mcts.choose(root,is_training,current_step=current_step)
                         # print(f"action: {action}",f"row: {action // self.board_size},col: {action % self.board_size}")
                         #t2 = time.time()
                         root.parent = None
@@ -210,7 +211,7 @@ class Agent:
                     else:                         # 白方 = 你的AI (mcts)
                         mcts.search(root, self.inference_batch_size, self.search_num, self.exploration_factor)
                         policy = mcts.get_policy(root, self.board_size)
-                        action, root = mcts.choose(root, is_training)
+                        action, root = mcts.choose(root, is_training,current_step=current_step)
                     #print(env.board)
                     if env.current_player == minimax_player:
                             game_history.append((state.copy(),policy.copy(),-env.current_player,env.last_move))
@@ -545,7 +546,7 @@ class Agent:
             # =========================
             with torch.no_grad():
                 # network policy probs
-                pred_probs = F.softmax(p_logits, dim=1)
+                pred_probs = F.softmax(masked_p_logits, dim=1)
 
                 # network entropy
                 pred_entropy = -(
