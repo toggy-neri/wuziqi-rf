@@ -1,24 +1,27 @@
-alphaTao-v0.6:
+alphaTao-v0.9:
+  is_pretrain: true
+  pretrain_steps: 5000
+  pretrain_file: 'minimax_data1.pkl'
   is_training: true
   optimizer_batch_size: 64
   inference_batch_size: 64
-  replay_memory_size: 5000
-  exist_model_name: 'alphaTao-v0.6'
-  run_dir: 'runs\alphaTao-v0.5'
-  restore_dir: 'runs\alphaTao-v0.6'
-  exploration_factor: 5
+  replay_memory_size: 2000
+  exist_model_name: 'alphaTao-v0.9'
+  run_dir: 'runs\alphaTao-v0.9'
+  restore_dir: 'runs\alphaTao-v0.9'
+  exploration_factor: 1.5
   is_self_play: true
-  self_play_num: 1000
+  self_play_num: 800
   board_size: 15
   residual_blocks: 10
   update_freq: 2
   warmup_steps: 0
-  restore_epoch: 10
+  restore_epoch: 25
   search_num: 800
-  is_continue_training: true
+  is_continue_training: false
   is_muti_optimizer: true
-  num_optimizer: 3
-  lr: 0.005
+  num_optimizer: 5
+  lr: 0.00005
 
 alphaTao-v0.4-run:
   is_training: false
@@ -68,14 +71,14 @@ test_overfit:
   run_dir: 'runs\test_overfit'
   restore_dir: 'runs\test_overfit'
   restore_epoch: 4
-  exploration_factor: 5
+  exploration_factor: 1
   warmup_steps: 0
   is_self_play: true
   self_play_num: 100
   board_size: 8
   residual_blocks: 10
   update_freq: 2
-  search_num: 800
+  search_num: 400
   is_continue_training: false
   is_muti_optimizer: true
   num_optimizer: 10

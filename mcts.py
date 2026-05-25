@@ -43,11 +43,11 @@ class MCTS():
         original_board = self.env.board.copy()
         original_last_move = self.env.last_move
         original_player = self.env.current_player
-        original_history = self.env.history.copy() if hasattr(self.env, 'history') else []
+        original_history = self.env.move_memory.copy() if hasattr(self.env, 'move_memory') else []
         policy = []
-        if node.is_visited and node.actions is not None:
-            noise = np.random.dirichlet([0.3] * len(node.actions))
-            node.probs = 0.85 * node.probs + 0.15 * noise
+        if node.is_visited and node.actions is not None and self.is_training:
+            noise = np.random.dirichlet([0.044] * len(node.actions))
+            node.probs = 0.75 * node.probs + 0.25 * noise
        
         #expand the root node,get the node info
         for _ in range(search_num // batch_size):
@@ -55,6 +55,7 @@ class MCTS():
             #expand the layer,use batch
             leaf_nodes = []
             leaf_states = []
+            leaf_boards = [] 
             paths = []
             terminal_dones = []
             terminal_values = []
@@ -64,7 +65,7 @@ class MCTS():
                 path_len = 0
                 #find the leaf node
                 cur_node = node
-                #t0 = time.time()
+                # t0 = time.time()
                 path = [cur_node]
                 #new_state = state.copy()
                 v_terminal = None
@@ -74,27 +75,29 @@ class MCTS():
                 #expand the tree
                 
                 while cur_node.is_visited :
+                    is_root = (cur_node is node)
                     action, next_node = self.get_best_child(
                         cur_node,
                         self.env.board,
+                        is_root,
                         exploration_factor
                     )
+                    #self.env.current_player = -self.env.current_player
                     if next_node is None:
                         break
-                    board_before = self.env.board.copy()
 
                     _, reward, done, info = self.env.step(action)
                     if done:
                         v_terminal = 1 if info["winner"] == -self.env.current_player else -1
                         break
-                    if info.get("invalid_move", False):
+                    # if info.get("invalid_move", False):
 
-                        print("INVALID:", action)
+                    #     print("INVALID:", action)
 
-                        self.env.undo()   # 关键！！！
+                    #     self.env.undo()   # 关键！！！
 
-                        # 不更新 node
-                        continue
+                    #     # 不更新 node
+                    #     continue
                     
 
                     # ✔ valid move 才前进
@@ -109,7 +112,8 @@ class MCTS():
 
 
                 leaf_nodes.append(cur_node)
-                leaf_states.append((self.env.board.copy(),-self.env.current_player))
+                leaf_states.append(self.env.get_channel_state(self.env.board, self.env.current_player))
+                leaf_boards.append(self.env.board.copy())
                 paths.append(path)
 
                 for _ in range(path_len):
@@ -125,20 +129,39 @@ class MCTS():
                 #     print("UNDO ERROR:", e)
                 #     pass
                 
-            #t1 = time.time()
+            # t1 = time.time()
 
-            states_np = np.stack([self.env.get_channel_state(board,current_player) for board,current_player in leaf_states])
+            states_np = np.stack(leaf_states)
             inputs = torch.from_numpy(states_np).to(device, non_blocking=True).float()
             #inputs = torch.stack([torch.tensor(s.get_channel_state(s.board)) for s in leaf_states]).to(device)
             #done,winner = state._check_win(state.last_move)
+            # with torch.no_grad():
+            #     policy , v = self.network(inputs)
+            # valid_mask = self.get_valid_mask(self.env.board, radius=2)
+
+            # valid_mask_tensor = torch.tensor(valid_mask, dtype=policy.dtype, device=policy.device)
+
+            # 张量相乘
+            # policy = policy * valid_mask_tensor
             with torch.no_grad():
                 policy , v = self.network(inputs)
-            #t2 = time.time()
+            # 生成蒙版并应用
+            policy = self.mask_and_softmax_batch(policy)
+            valid_mask = self.get_valid_mask(self.env.board, radius=2)
+            valid_mask_tensor = torch.tensor(valid_mask, dtype=policy.dtype, device=policy.device)
+            policy = policy * valid_mask_tensor                    # 非法位置概率清零
+            policy_sum = policy.sum()
+            if policy_sum > 0:
+                policy = policy / policy_sum                # 重新归一化
+            else:
+                # 极端情况：蒙版全0，fallback到均匀分布
+                policy = valid_mask / valid_mask.sum()
+            # t2 = time.time()
             
-            #print(f"树搜索+copy: {t1-t0:.3f}s  |  网络推理: {t2-t1:.3f}s")
+            # print(f"树搜索+copy: {t1-t0:.3f}s  |  网络推理: {t2-t1:.3f}s")
             #ta = time.time()
             # 从 leaf_states 提取 board 数组
-            boards = np.stack([s for s,_ in leaf_states])  # (batch_size, 15, 15)
+            #boards = np.stack([s for s,_ in leaf_states])  # (batch_size, 15, 15)
             probs = self.mask_and_softmax_batch(policy)
             #tb = time.time()
             probs = probs.cpu().numpy()
@@ -161,8 +184,11 @@ class MCTS():
                 else:
                     real_v = v[i].item()
                 #tb = time.time()
-                leaf.actions = np.arange(probs.shape[1])   # 所有动作索引
-                leaf.probs = probs[i]                      # 对应概率
+                # leaf.actions = np.arange(probs.shape[1])   # 所有动作索引
+                # leaf.probs = probs[i]                      # 对应概率
+
+                self.expand_node(leaf, leaf_boards[i], probs[i]) 
+
                 if(len(leaf.actions) == 0):
                     raise ValueError("leaf.actions is empty")
                 #print(leaf.actions)
@@ -184,10 +210,11 @@ class MCTS():
 
             #print(f"树搜索: {t_tree:.3f}s | 推理: {t_infer:.3f}s | 反传+赋值: {t_back:.3f}s")
         self.env.board = original_board
+        self.env
         self.env.last_move = original_last_move
         self.env.current_player = original_player
-        if hasattr(self.env, 'history'):
-            self.env.history = original_history
+        if hasattr(self.env, 'move_memory'):
+            self.env.move_memory = original_history
 
 
         
@@ -205,6 +232,49 @@ class MCTS():
                 p = p / sum_visits
 
             return p
+    
+    def expand_node(self, node: TreeNode, board: np.ndarray, raw_probs: np.ndarray):
+        """在节点首次被访问时调用，只提取并保存合法动作及其概率"""
+        # 1. 获取当前棋盘的合法位置 Mask
+        valid_mask = self.get_valid_mask(board, radius=2)
+        
+        # 2. 找到所有合法动作的索引
+        valid_actions = np.where(valid_mask > 0)[0]
+        
+        # 【防御1】：如果物理上就没有合法位置（理论上不应发生，除非终局判断漏了）
+        if len(valid_actions) == 0:
+            node.actions = np.array([], dtype=np.int64)
+            node.probs = np.array([], dtype=np.float32)
+            return
+
+        # 【防御2】：拦截 NaN 和无穷大
+        if np.any(np.isnan(raw_probs)) or np.any(np.isinf(raw_probs)):
+            print("⚠️ 警告：网络输出包含 NaN 或 Inf！回退到均匀分布")
+            valid_probs = np.ones(len(valid_actions), dtype=np.float32) / len(valid_actions)
+            node.actions = valid_actions
+            node.probs = valid_probs
+            return
+
+        # 3. 提取合法动作对应的概率
+        valid_probs = raw_probs[valid_actions].copy()
+        
+        # 【防御3】：截断负数（防止网络输出极小的负数导致求和异常）
+        valid_probs = np.maximum(valid_probs, 0)
+
+        # 4. 重新归一化
+        prob_sum = valid_probs.sum()
+        if prob_sum > 1e-8:  # 提高浮点数比较的安全阈值
+            valid_probs = valid_probs / prob_sum
+        else:
+            # 【防御4】：如果网络把所有合法位置的概率都预测成了 0，回退到均匀分布
+            print("⚠️ 警告：网络对所有合法位置预测概率为0！回退到均匀分布")
+            valid_probs = np.ones(len(valid_actions), dtype=np.float32) / len(valid_actions)
+
+        # 5. 保存到节点中
+        node.actions = valid_actions
+        node.probs = valid_probs
+
+
             
 
                        #self.walk(self.root)
@@ -215,6 +285,7 @@ class MCTS():
             if node.parent is not None: 
                 node.visits -= v_loss
                 node.score += v_loss
+            
             node.visits += 1
             node.score += score
             score = -score
@@ -226,8 +297,12 @@ class MCTS():
     def choose(self,root_node,is_training):
         actions = []
         visits = []
-
-        for action,child in root_node.children.items():
+        valid_mask = self.get_valid_mask(self.env.board, radius=2)
+        legal_children = {
+        a: child for a, child in root_node.children.items() 
+        if valid_mask[a] > 0
+        }
+        for action,child in legal_children.items():
             actions.append(action)
             visits.append(child.visits)
         if(len(actions) == 0):
@@ -235,25 +310,56 @@ class MCTS():
         if not is_training:
             best_action = np.argmax(visits)
             action = actions[best_action]
-            return action,root_node.children[action]
+            return action,legal_children[action]
         
         else:
-            temperature = 1
+            temperature = 0.5
             visits = np.array(visits)
             n_pow = np.power(visits, 1.0 / temperature)
             probs = n_pow / np.sum(n_pow)
             # 0 is pass
         action = np.random.choice(actions, p=probs)
-        return action,root_node.children[action]
+        return action,legal_children[action]
 
 
 
     def mask_and_softmax_batch(self, policy_logits_batch):
 
+
         probs = F.softmax(policy_logits_batch, dim=1)
 
         return probs
-
+    @classmethod
+    def get_valid_mask(self,board: np.ndarray, radius: int = 2) -> np.ndarray:
+        size = board.shape[0]
+        
+        if not np.any(board != 0):
+            # 棋盘为空时的逻辑
+            mask = np.zeros((size, size), dtype=np.float32)
+            
+            # 计算中心的索引 (例如 15x15 棋盘，center为7)
+            center = size // 2 
+            
+            # 计算 5x5 区域的边界索引 (radius=2 时，扩展2格)
+            # r_start = 7 - 2 = 5, r_end = 7 + 3 = 10 (切片不包含10，即 5~9 共5个索引)
+            r_start = max(0, center - radius)
+            r_end = min(size, center + radius + 1)
+            
+            # 将中心的 5x5 区域置为1
+            mask[r_start:r_end, r_start:r_end] = 1.0
+            
+            # 展平为一维数组并返回
+            return mask.ravel()
+        
+        # 向量化：用最大池化膨胀occupied区域
+        from scipy.ndimage import binary_dilation
+        occupied = (board != 0)
+        # 生成radius大小的结构元素
+        struct = np.ones((2 * radius + 1, 2 * radius + 1), dtype=bool)
+        dilated = binary_dilation(occupied, structure=struct)  # 膨胀
+        # 合法位置 = 膨胀后为True 且 当前为空
+        valid_2d = dilated & (board == 0)
+        return valid_2d.ravel().astype(np.float32)
     def rollout(self, node):
         return #policy / policy.sum()
 
@@ -263,36 +369,37 @@ class MCTS():
 
 
     
-    def get_best_child(self, node, board, c_puct=1.5):
-
+    def get_best_child(self, node, board, is_root,c_puct=1.5):
+        c_puct = 2.0 if is_root else c_puct
+    
         actions = node.actions
         ps = node.probs
 
         # 合法位置 mask
-        legal_mask = (board.reshape(-1) == 0)
+        # legal_mask = (board.reshape(-1) == 0)
 
-        # 只保留合法动作
-        legal_actions = actions[legal_mask[actions]]
-        legal_ps = ps[legal_mask[actions]]
+        # # 只保留合法动作
+        # legal_actions = actions[legal_mask[actions]]
+        # legal_ps = ps[legal_mask[actions]]
 
         # 没有合法动作
-        if len(legal_actions) == 0:
+        if len(actions) == 0:
             return None, None
 
         # visits / scores
         vs = np.array([
             node.children[a].visits if a in node.children else 0
-            for a in legal_actions
+            for a in actions
         ])
 
         ss = np.array([
             node.children[a].score if a in node.children else 0
-            for a in legal_actions
+            for a in actions
         ])
         #print(ss)
         # PUCT
         q = np.where(vs > 0, ss / (vs + 1e-6), 0.0)
-        u = c_puct * legal_ps * (
+        u = c_puct * ps * (
             np.sqrt(max(node.visits,0) + 1e-8) / (1.0 + vs)
         )
 
@@ -300,14 +407,14 @@ class MCTS():
 
         best_idx = np.argmax(scores)
 
-        best_action = legal_actions[best_idx]
+        best_action = actions[best_idx]
 
         # expand
         if best_action not in node.children:
 
             node.children[best_action] = TreeNode(parent=node)
 
-            node.children[best_action].p_value = legal_ps[best_idx]
+            node.children[best_action].p_value = ps[best_idx]
 
         child = node.children[best_action]
 
