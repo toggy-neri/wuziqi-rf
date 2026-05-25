@@ -19,7 +19,7 @@ class WuziqiEnv:
         }
         #maintain move info
         self.move_memory = []
-    
+        self.winner = None
         self.done = False
         self.last_move = None
         #black first
@@ -47,8 +47,8 @@ class WuziqiEnv:
             done: 游戏是否结束
             info: 额外信息
         """
-        if self.done:
-            return self.board.copy(), 0, True, {"winner": self.winner}  #在search中调用了check_win,当时赋值了self.done = True,但是未回滚
+        # if self.done:
+        #     return self.board.copy(), 0, True, {"winner": self.winner}  #在search中调用了check_win,当时赋值了self.done = True,但是未回滚
         if action is None:
             return self.board.copy(), 0, False, {"pass": True}
         row = action // self.board_size
@@ -68,9 +68,9 @@ class WuziqiEnv:
         self.last_move_plane[row, col] = 1
         
         self.last_move = action
-        self.move_memory.append((action,self.current_player,self.last_move))
+        self.move_memory.append((action,self.current_player))
         is_win,winner = self._check_win(action)
-        if is_win:
+        if is_win:  
             self.done = True
             self.winner = winner
             reward = 1.0 if winner == 1 else -1.0
@@ -122,20 +122,21 @@ class WuziqiEnv:
         if not self.move_memory:  
             return
         try:
-            action,player,position = self.move_memory.pop()
+            action,player = self.move_memory.pop()
         except IndexError as e:
             print("UNDO ERROR:", e)
             return
-        row = position // self.board_size
-        col = position % self.board_size
+        row = action // self.board_size
+        col = action % self.board_size
         self.board[row, col] = 0
         self.white_plane[row, col] = 0
         self.black_plane[row, col] = 0
         if self.move_memory:
-            self.last_move = self.move_memory[-1][2]
+            self.last_move = self.move_memory[-1][0]
 
         self.winner = None
         self.current_player = -self.current_player
+        self.is_terminal = False
         self.done = False
     
     def _is_board_full(self) -> bool:
@@ -164,21 +165,65 @@ class WuziqiEnv:
     #         last_move_state[row, col] = 1.0
     #     current_player_state = np.full((self.board_size, self.board_size), self.current_player, dtype=np.float32)
     #     return black_state, white_state, last_move_state, current_player_state
-    def get_channel_state(self, board: np.ndarray, last_move: int,current_player: int) -> np.ndarray:
+
+    # def get_channel_state(self, board: np.ndarray, last_move: int,current_player: int) -> np.ndarray:
+    #     black_plane = (board == 1).astype(np.float32)
+    #     white_plane = (board == -1).astype(np.float32)
+    #     last_move_plane = np.zeros((self.board_size, self.board_size), dtype=np.float32)
+    #     if last_move is not None:
+    #         row = last_move // self.board_size
+    #         col = last_move % self.board_size
+    #         last_move_plane[row, col] = 1.0
+    #     return np.array([
+    #         black_plane,
+    #         white_plane,
+    #         last_move_plane,
+    #         self.current_player_plane[current_player]
+    #     ], dtype=np.float32)
+    
+    def get_channel_state(self, board: np.ndarray,  current_player: int) -> np.ndarray:
         black_plane = (board == 1).astype(np.float32)
         white_plane = (board == -1).astype(np.float32)
-        last_move_plane = np.zeros((self.board_size, self.board_size), dtype=np.float32)
-        if last_move is not None:
-            row = last_move // self.board_size
-            col = last_move % self.board_size
-            last_move_plane[row, col] = 1.0
+        
+        # 当前玩家平面
+        current_player_plane = self.current_player_plane[current_player]
+
+        total_moves = int(np.count_nonzero(board))
+
+        history_planes = []
+
+        for i in range(5):
+
+            plane = np.zeros(
+                (self.board_size, self.board_size),
+                dtype=np.float32
+            )
+
+            move_idx = total_moves - 1 - i
+
+            if move_idx >= 0:
+
+                # 从 move_memory 取历史
+                if move_idx < len(self.move_memory):
+
+                    move = self.move_memory[move_idx][0]
+
+                    if move is not None:
+
+                        row = move // self.board_size
+                        col = move % self.board_size
+
+                        plane[row, col] = 1.0
+
+            history_planes.append(plane)
+            
+        # 总通道数：black + white + 5步历史 + current_player = 8
         return np.array([
             black_plane,
             white_plane,
-            last_move_plane,
-            self.current_player_plane[current_player]
+            *history_planes,
+            current_player_plane
         ], dtype=np.float32)
-    
 
     def render(self) -> str:
         symbols = {0: '.', 1: 'X', -1: 'O'}

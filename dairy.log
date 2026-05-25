@@ -20,3 +20,51 @@
 4.修复memory player value bug
 5.更改mask位置
 6.修复undo问题，直接将last_move设为none
+
+5.15
+1.调整不同参数，继续进行 v0.4 的训练，value_loss的训练体现了否定之否定原理 
+2.2500次后调整了value的线性层设计
+3.后面又运行了3000次，一开始很有下降趋势，后面又反弹了
+
+5.16 
+1.再次下调学习率至 0.00001后面发现 0.05就足够了
+2.考虑将输入通道变为8，从过去一步改为过去5步 to 0.6
+3.将通道数从64扩展至128  to think 如何估算  to 0.7
+
+5.17 
+1.模型拓维后变得很糟糕，学习率调至惊天 0.01,后面又调成 0.0001
+2.value_loss系数降低
+3.增加梯度剪裁
+4.修改噪声参数
+
+5.18
+1.修改了loss计算，对不合法落子不更新
+2.区分不同的exploration （根节点和其他）
+3.增加了预训练环节
+
+5.19
+1.预训练50000局效果不错，但是一旦开始自训练就开始变得糟糕
+2.针对上述问题，引入冻结残差塔的机制
+
+5.20
+1.考虑对规则棋型进行训练,主要训练胜负手
+2.修复标签泄露bug，在生成规则棋盘时，黑-白=0 时黑胜率100%，黑-白=+1 时白胜率100%
+
+5.22 
+1.引入了minimax来与现有神经网络就行对弈
+2.考虑扩展线性层
+3.预训练增强，随机引入多个盘面
+4.使用minimax生成pretrain数据集
+
+5.23
+1.发现minimax算法生成随机性受限
+
+5.24
+1.增加了杀棋router
+2.增加了position mask，radius=2 （choose search函数，后续记得用超参数约束）
+3.去掉原始mask生成方式
+
+5.25
+1.给预训练也加入了mask
+You have to keep in mind that AlphaZero is an extremely sample-inefficient learning technique, even for simple problems. 
+Rather, the strengths of this algorithm is that 1) it is pretty generic and 2) it can leverage huge amounts of computation.

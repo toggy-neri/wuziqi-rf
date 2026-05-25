@@ -204,7 +204,8 @@ class AiMatch:
         }
 
 
-        self.mcts = MCTS(network,env,False)
+        self.mcts = MCTS(network,self.env,False)
+        self.mcts_ai = MCTS(network,self.env, False)
         self.font = pygame.font.Font(None, 36)
         self.small_font = pygame.font.Font(None,24)
 
@@ -262,8 +263,8 @@ class AiMatch:
                         pygame.draw.circle(self.screen, self.colors['line'], (x,y), self.cell_size // 2 ,1 )
 
         if self.env.last_move is not None:
-            row = self.env.last_move // self.env.board_size
-            col = self.env.last_move % self.env.board_size
+            row = self.env.last_move // self.board_size
+            col = self.env.last_move % self.board_size
             x = self.margin + col * self.cell_size
             y = self.margin + row * self.cell_size
             pygame.draw.circle(self.screen, self.colors['highlight'], (x,y), self.cell_size // 2 - 2)
@@ -305,9 +306,11 @@ class AiMatch:
         self.pending_move = None
 
     def trigger_ai(self):
+        self.mcts_ai.env = self.env.copy()
         def _think():#inner function
-            self.mcts.search(self.root,self.batch_size,self.search_num,1.5)
-            action , new_root = self.mcts.choose(self.root,is_training=False)
+            self.mcts_ai.search(self.root,self.batch_size,self.search_num,1.5)
+            action , new_root = self.mcts_ai.choose(self.root,is_training=False)
+            self.mcts_ai.env.step(action)
             self.root = new_root
             self.root.parent = None
             self.pending_move = action
@@ -354,13 +357,15 @@ class AiMatch:
                     self.handle_human_click(event.pos)
 
             if self.pending_move is not None and not self.env.done:
-                action = self.pending_move
+                self.env.step(self.pending_move)
                 self.pending_move = None
-                self.env.step(action)
+
                 self.is_ai_thinking = False
-            
             self.draw_board()
             self.draw_pieces()
+
+            
+
             self.draw_ui()
             pygame.display.flip()
             clock.tick(60)
