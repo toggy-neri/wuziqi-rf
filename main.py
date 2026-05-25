@@ -509,21 +509,21 @@ class Agent:
             # 3. 构建孤岛位置的 Mask (膨胀范围外的空位)
             # 注意：这里需要对 batch 中的每个棋盘计算 mask
             # 如果 get_valid_mask 计算较慢，可以只惩罚 occupied_mask，效果已经足够好
-            island_mask_list = []
-            for i in range(batch_states.shape[0]):
-                board_cur = batch_states[i, 0].cpu().numpy()
-                board_opp = batch_states[i, 1].cpu().numpy()
-                board_2d = board_cur - board_opp
-                valid_m = MCTS.get_valid_mask(board_2d.astype(np.int8), radius=2)
-                # 孤岛 = 合法区取反
-                island_m = 1.0 - valid_m 
-                island_mask_list.append(island_m)
-            island_mask = torch.tensor(np.stack(island_mask_list), dtype=torch.float32, device=device)
+            # island_mask_list = []
+            # for i in range(batch_states.shape[0]):
+            #     board_cur = batch_states[i, 0].cpu().numpy()
+            #     board_opp = batch_states[i, 1].cpu().numpy()
+            #     board_2d = board_cur - board_opp
+            #     valid_m = MCTS.get_valid_mask(board_2d.astype(np.int8), radius=2)
+            #     # 孤岛 = 合法区取反
+            #     island_m = 1.0 - valid_m 
+            #     island_mask_list.append(island_m)
+            #island_mask = torch.tensor(np.stack(island_mask_list), dtype=torch.float32, device=device)
 
             # 综合：绝对不能下的位置 = 已有棋子 OR 孤岛
-            illegal_mask = torch.clamp(occupied_mask + island_mask, min=0.0, max=1.0)
+            #illegal_mask = torch.clamp(occupied_mask + island_mask, min=0.0, max=1.0)
 
-            legal_mask = 1.0 - illegal_mask
+            legal_mask = 1.0 - occupied_mask
             masked_p_logits = p_logits.clone()
             masked_p_logits[legal_mask == 0] = -1e9 
             log_p = F.log_softmax(masked_p_logits, dim=1)
@@ -535,7 +535,7 @@ class Agent:
             )
             # 4. 计算网络在非法区域浪费的概率
             # pred_p shape: (B, 225)
-            illegal_prob_sum = torch.sum(pred_p * illegal_mask, dim=1).mean()
+            illegal_prob_sum = torch.sum(pred_p * occupied_mask, dim=1).mean()
             lambda_illegal = 10.0 
             policy_loss = policy_loss_ce + lambda_illegal * illegal_prob_sum
             total_loss = 5 * value_loss + policy_loss
@@ -574,8 +574,8 @@ class Agent:
             print(
                 f"p_loss={policy_loss_ce.item():.4f} | "
                 f"v_loss={value_loss.item():.4f} | "
-                f"pred_H={pred_entropy.item():.4f} | "
-                f"tar_H={target_entropy.item():.4f} | "
+                f"pred_entropy={pred_entropy.item():.4f} | "
+                f"tar_entropy={target_entropy.item():.4f} | "
                 f"illegal={illegal_prob_sum.item():.4f} | "
                 
                 # 打印动作数量

@@ -1,5 +1,5 @@
 alphaTao-v0.9:
-  is_pretrain: true
+  is_pretrain: false
   pretrain_steps: 5000
   pretrain_file: 'minimax_data1.pkl'
   is_training: true
@@ -17,7 +17,7 @@ alphaTao-v0.9:
   update_freq: 2
   warmup_steps: 0
   restore_epoch: 25
-  search_num: 800
+  search_num: 400
   is_continue_training: true
   is_muti_optimizer: true
   num_optimizer: 5
