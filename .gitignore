@@ -12,5 +12,5 @@ wheels/
 *.pt
 *.txt
 *.log
-
+*.yaml
 runs/

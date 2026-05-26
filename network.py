@@ -31,13 +31,13 @@ class Network(nn.Module):
         self.residual_blocks = nn.Sequential(*[Residual_block(channels, channels) for _ in range(num_res_blocks)])
 
         #Policy head
-        self.policy_head = nn.Conv2d(channels, 2, kernel_size=1)
-        self.bn_policy = nn.BatchNorm2d(2)
-        self.policy_fc = nn.Linear(2*board_size*board_size, board_size*board_size)
+        self.policy_head = nn.Conv2d(channels, 16, kernel_size=1)
+        self.bn_policy = nn.BatchNorm2d(16)
+        self.policy_fc = nn.Linear(16*board_size*board_size, board_size*board_size)
 
         #value head
         self.value_head = nn.Conv2d(channels, 2, kernel_size=1)
-        self.bn_value   = nn.BatchNorm2d(1)          # BN放Conv后
+        self.bn_value   = nn.BatchNorm2d(2)          # BN放Conv后
         self.value_fc1  = nn.Linear(2*board_size*board_size, 256)  # 输入只有225
         self.value_fc2  = nn.Linear(256, 1)
         nn.init.uniform_(self.value_fc2.weight, -0.003, 0.003)
@@ -51,7 +51,7 @@ class Network(nn.Module):
 
         #policy output
         p = F.relu(self.bn_policy(self.policy_head(x)))
-        p = p.view(-1, 2*self.board_size*self.board_size)
+        p = p.view(-1, 16*self.board_size*self.board_size)
         p = self.policy_fc(p)
 
         #value output

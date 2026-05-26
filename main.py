@@ -145,7 +145,7 @@ class Agent:
                   list(self.network.bn_value.parameters()) +
                   list(self.network.value_fc1.parameters()) +
                   list(self.network.value_fc2.parameters()),
-        "lr": self.lr * 10
+        "lr": self.lr #* 10
     }
 
 ], weight_decay=1e-4)
@@ -477,6 +477,7 @@ class Agent:
             # ============ 诊断结束 ============
             # with torch.no_grad():
             #     # 取一个样本
+            #     idx = 1
             #     sample_state  = batch_states[idx].cpu().numpy()   # (C,15,15)
             #     sample_target = batch_actions[idx].cpu().numpy()  # (225,)
                 
@@ -551,12 +552,16 @@ class Agent:
             # 综合：绝对不能下的位置 = 已有棋子 OR 孤岛
             #illegal_mask = torch.clamp(occupied_mask + island_mask, min=0.0, max=1.0)
 
-            legal_mask = 1.0 - occupied_mask
+            #legal_mask = 1.0 - occupied_mask
             masked_p_logits = p_logits.clone()
-            masked_p_logits[legal_mask == 0] = -1e9 
+            masked_p_logits = torch.where(
+                occupied_mask == 1.0, 
+                torch.full_like(p_logits, -1e9), 
+                p_logits
+            )
             
             log_p = F.log_softmax(masked_p_logits, dim=1)
-            #pred_p = torch.exp(log_p)
+            #pred_p = F.softmax(p_logits, dim=1)
             
             
             policy_loss_ce = -torch.mean(
@@ -565,20 +570,35 @@ class Agent:
             # 4. 计算网络在非法区域浪费的概率
             # pred_p shape: (B, 225)
             #illegal_prob_sum = torch.sum(pred_p * occupied_mask, dim=1).mean()
-            lambda_illegal = 10.0 
-            policy_loss = policy_loss_ce #+ lambda_illegal * illegal_prob_sum
-            total_loss = 10 * value_loss + policy_loss
+            #lambda_illegal = 10.0 
+            policy_loss = policy_loss_ce
+            total_loss = 5 * value_loss + policy_loss_ce #+ lambda_illegal * illegal_prob_sum
             #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
                         # =========================
             # entropy monitoring
             # =========================
-            with torch.no_grad():
-                v_grad_norm = sum(
-                    p.grad.norm().item() 
-                    for n, p in self.network.named_parameters() 
-                    if 'value' in n and p.grad is not None
-                )
-                print(f"value head grad norm: {v_grad_norm:.6f}")
+            # with torch.no_grad():
+            #     v_grad_norm = sum(
+            #         p.grad.norm().item() 
+            #         for n, p in self.network.named_parameters() 
+            #         if 'value' in n and p.grad is not None
+            #     )
+            #     print(f"value head grad norm: {v_grad_norm:.6f}")
+            # with torch.no_grad():
+
+            #     illegal_mass = (
+            #         pred_p * occupied_mask
+            #     ).sum(dim=1).mean()
+
+            #     legal_cnt = legal_mask.sum(dim=1).float().mean()
+
+            #     print(
+            #         f"illegal_mass={illegal_mass:.8f}"
+            #     )
+
+            #     print(
+            #         f"actual_legal_cnt={legal_cnt:.1f}"
+            #     )
             with torch.no_grad():
                 # network policy probs
                 pred_probs = F.softmax(masked_p_logits, dim=1)
