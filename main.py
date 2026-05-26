@@ -139,7 +139,7 @@ class Agent:
         "lr": self.lr
     },
 
-    # value head
+    # value head 
     {
         "params": list(self.network.value_head.parameters()) +
                   list(self.network.bn_value.parameters()) +
@@ -366,7 +366,7 @@ class Agent:
             # 旋转增强：对每个样本生成4个旋转版本
             aug_states = []
             aug_actions = []
-            # aug_values = []
+            aug_values = []
 
             for k in range(4):  # k=0,1,2,3 对应 0°,90°,180°,270°
                 # 旋转棋盘：state的后两个维度是棋盘(H,W)，对axis=(2,3)旋转
@@ -379,16 +379,16 @@ class Agent:
 
                 aug_states.append(rotated_states)
                 aug_actions.append(rotated_actions)
-                # aug_values.append(values)
+                aug_values.append(values)
 
             # 拼接成 4*B 的大batch
             aug_states  = np.concatenate(aug_states,  axis=0)
             aug_actions = np.concatenate(aug_actions, axis=0)
-            # aug_values  = np.concatenate(aug_values,  axis=0)
+            aug_values  = np.concatenate(aug_values,  axis=0)
 
             batch_states  = torch.FloatTensor(aug_states).to(device)
             batch_actions = torch.FloatTensor(aug_actions).to(device)
-            batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
+            batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
 
             # states = np.array(states)    # (B, 4, 15, 15)
             # actions = np.array(actions)  # (B, 225)
@@ -422,7 +422,7 @@ class Agent:
             print(f"v mean: {v.mean().item():.3f}, std: {v.std().item():.3f}")
             print(f"V 预测值样例: {v[:5].detach().cpu().numpy().flatten()}") # 打印前5个预测值
             print(f"V 真实值样例: {batch_values[:5].cpu().numpy().flatten()}")
-            value_loss = F.mse_loss(v[:batch_size], batch_values) 
+            value_loss = F.mse_loss(v, batch_values) 
             #value_loss = F.mse_loss(v, batch_values)
 
             # policy cross entropy
@@ -554,8 +554,9 @@ class Agent:
             legal_mask = 1.0 - occupied_mask
             masked_p_logits = p_logits.clone()
             masked_p_logits[legal_mask == 0] = -1e9 
+            
             log_p = F.log_softmax(masked_p_logits, dim=1)
-            pred_p = torch.exp(log_p)
+            #pred_p = torch.exp(log_p)
             
             
             policy_loss_ce = -torch.mean(
@@ -563,14 +564,21 @@ class Agent:
             )
             # 4. 计算网络在非法区域浪费的概率
             # pred_p shape: (B, 225)
-            illegal_prob_sum = torch.sum(pred_p * occupied_mask, dim=1).mean()
+            #illegal_prob_sum = torch.sum(pred_p * occupied_mask, dim=1).mean()
             lambda_illegal = 10.0 
-            policy_loss = policy_loss_ce + lambda_illegal * illegal_prob_sum
-            total_loss = 5 * value_loss + policy_loss
+            policy_loss = policy_loss_ce #+ lambda_illegal * illegal_prob_sum
+            total_loss = 10 * value_loss + policy_loss
             #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
                         # =========================
             # entropy monitoring
             # =========================
+            with torch.no_grad():
+                v_grad_norm = sum(
+                    p.grad.norm().item() 
+                    for n, p in self.network.named_parameters() 
+                    if 'value' in n and p.grad is not None
+                )
+                print(f"value head grad norm: {v_grad_norm:.6f}")
             with torch.no_grad():
                 # network policy probs
                 pred_probs = F.softmax(masked_p_logits, dim=1)
@@ -604,7 +612,7 @@ class Agent:
                 f"v_loss={value_loss.item():.4f} | "
                 f"pred_entropy={pred_entropy.item():.4f} | "
                 f"tar_entropy={target_entropy.item():.4f} | "
-                f"illegal={illegal_prob_sum.item():.4f} | "
+                #f"illegal={illegal_prob_sum.item():.4f} | "
                 
                 # 打印动作数量
                 f"pred_cnt={pred_nonzero_counts.item():.1f} | "

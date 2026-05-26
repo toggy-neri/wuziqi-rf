@@ -36,10 +36,12 @@ class Network(nn.Module):
         self.policy_fc = nn.Linear(2*board_size*board_size, board_size*board_size)
 
         #value head
-        self.value_head = nn.Conv2d(channels, 1, kernel_size=1)
+        self.value_head = nn.Conv2d(channels, 2, kernel_size=1)
         self.bn_value   = nn.BatchNorm2d(1)          # BN放Conv后
-        self.value_fc1  = nn.Linear(board_size*board_size, 256)  # 输入只有225
+        self.value_fc1  = nn.Linear(2*board_size*board_size, 256)  # 输入只有225
         self.value_fc2  = nn.Linear(256, 1)
+        nn.init.uniform_(self.value_fc2.weight, -0.003, 0.003)
+        nn.init.zeros_(self.value_fc2.bias)
 
         #后期 加tanh
     def forward(self, x):
@@ -53,8 +55,8 @@ class Network(nn.Module):
         p = self.policy_fc(p)
 
         #value output
-        v = F.relu(self.bn_value(self.value_head(x))) 
-        v = v.view(-1, self.board_size**2)
+        v = torch.tanh(self.bn_value(self.value_head(x)))
+        v = v.view(-1, 2*self.board_size*self.board_size)
         v = F.relu(self.value_fc1(v))
         v = torch.tanh(self.value_fc2(v))
         
