@@ -7,6 +7,7 @@ import os
 import pickle
 
 #chess GUI
+from pic import PolicyVisualizer
 from wuziqi_gui import WuziqiGUI,AiMatch
 
 #chess control
@@ -389,35 +390,7 @@ class Agent:
             batch_states  = torch.FloatTensor(aug_states).to(device)
             batch_actions = torch.FloatTensor(aug_actions).to(device)
             batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
-
-            # states = np.array(states)    # (B, 4, 15, 15)
-            # actions = np.array(actions)  # (B, 225)
-            # values = np.array(values)    # (B,)
-
-            # # ================= 修改：随机旋转增强 =================
-            # # 每次只随机选一种旋转（0°, 90°, 180°, 270°），不要拼接！
-            # k = np.random.randint(0, 4) 
-            
-            # # 旋转棋盘
-            # aug_states = np.rot90(states, k=k, axes=(2, 3)).copy()
-
-            # # policy跟着旋转
-            # aug_actions = actions.reshape(-1, self.board_size, self.board_size)
-            # aug_actions = np.rot90(aug_actions, k=k, axes=(1, 2)).copy()
-            # aug_actions = aug_actions.reshape(-1, self.board_size * self.board_size)
-
-            # aug_values = values # Value 不变，因为只是视角旋转，胜负归属不变
-            # # ========================================================
-
-            # batch_states  = torch.FloatTensor(aug_states).to(device)
-            # batch_actions = torch.FloatTensor(aug_actions).to(device)
-            # batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
-
-
-            # batch_states  = torch.FloatTensor(states).to(device)
-            # batch_actions = torch.FloatTensor(actions).to(device)
-            # batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
-            #legal_mask = (batch_actions > 0).float() 
+ 
             p_logits, v = self.network(batch_states)
             print(f"v mean: {v.mean().item():.3f}, std: {v.std().item():.3f}")
             print(f"V 预测值样例: {v[:5].detach().cpu().numpy().flatten()}") # 打印前5个预测值
@@ -599,48 +572,149 @@ class Agent:
             #     print(
             #         f"actual_legal_cnt={legal_cnt:.1f}"
             #     )
+            # with torch.no_grad():
+            #     # network policy probs
+            #     pred_probs = F.softmax(masked_p_logits, dim=1)
+
+            #     # network entropy
+            #     pred_entropy = -(
+            #         pred_probs * torch.log(pred_probs + 1e-10)
+            #     ).sum(dim=1).mean()
+
+            #     # MCTS target entropy
+            #     target_entropy = -(
+            #         batch_actions * torch.log(batch_actions + 1e-10)
+            #     ).sum(dim=1).mean()
+
+            #     # ================= 新增诊断代码 =================
+            #     # 1. 计算 target (MCTS) 的动作数量和 Top-5
+            #     # batch_actions 形状是 (B, 225)
+            #     target_nonzero_counts = (batch_actions > 1e-6).sum(dim=1).float().mean() # 平均有多少个动作被赋予概率
+            #     target_top5_vals, _ = torch.topk(batch_actions, k=5, dim=1)
+            #     target_top5_mean = target_top5_vals.mean(dim=0) # 在 batch 维度求平均，得到 Top1-5 的平均概率
+
+            #     # 2. 计算 Pred (网络预测) 的动作数量和 Top-5
+            #     pred_nonzero_counts = (pred_probs > 1e-6).sum(dim=1).float().mean()
+            #     pred_top5_vals, _ = torch.topk(pred_probs, k=5, dim=1)
+            #     pred_top5_mean = pred_top5_vals.mean(dim=0)
+            #     # ==================================================
+            vis = PolicyVisualizer(save_dir='./runs/policy_logs', cmap='viridis')
+
+            # ... 训练循环中 ...
             with torch.no_grad():
-                # network policy probs
-                pred_probs = F.softmax(masked_p_logits, dim=1)
+                sample_idx = 0
+                state = batch_states[sample_idx] # [8, 15, 15]
+                
+                # === DEBUG 代码：打印 Mask 信息 ===
+                # 1. 检查原始通道数据
+                black_pieces = state[0] # 黑棋通道
+                white_pieces = state[1] # 白棋通道
+                occupied_raw = (black_pieces + white_pieces) # 有棋子的地方 > 0
+                
+                # 2. 检查你训练代码里计算出的 occupied_mask (假设你之前重建了它)
+                # 这里我重新生成一遍标准逻辑来对比
+                occupied_mask_calc = (state[0] + state[1] > 0).float()
+                occupied_mask_calc = occupied_mask_calc.view(-1) # 展平成 225 维
+                
+                print(f"\n--- Debugging Mask for Sample {sample_idx} ---")
+                print(f"Total Pieces on Board: {occupied_raw.sum().item()}")
+                print(f"Occupied Mask Sum (Should be > 0): {occupied_mask_calc.sum().item()}")
+                
+                # 3. 检查原始 logits
+                raw_logits = p_logits[sample_idx] # [225]
+                print(f"Raw Logits Max: {raw_logits.max().item():.4f}")
+                print(f"Raw Logits Min: {raw_logits.min().item():.4f}")
+                
+                # 4. 模拟 Mask 操作 (这就是你代码里干的事)
+                masked_logits_test = torch.where(occupied_mask_calc == 1.0, torch.full_like(raw_logits, -1e9), raw_logits)
+                print(f"Masked Logits Max: {masked_logits_test.max().item():.4f}")
+                print(f"Masked Logits Min: {masked_logits_test.min().item():.4f}")
+                
+                # 5. 检查 Softmax 结果
+                probs = F.softmax(masked_logits_test, dim=0)
+                print(f"Probs Sum (Should be 1.0): {probs.sum().item():.6f}")
+                
+                # 6. 致命检查：有棋子的地方，概率是多少？
+                prob_at_occupied = (probs * occupied_mask_calc).sum().item()
+                print(f"PROBABILITY AT OCCUPIED SPOTS: {prob_at_occupied:.6f} (期望值: 0.0000)")
+                
+                # 如果这里输出了大于 0.00001 的数字，说明 Mask 失败或者白做了
+                if prob_at_occupied > 0.001:
+                    print("❌ BUG CONFIRMED: AI is predicting moves on occupied spots!")
+                else:
+                    print("✅ Mask works in simulation, check Loss calculation.")
+                    
+                # 1. 画单个样本的预测分布 (比如画 Batch 里的第 0 个样本)
+                sample_idx = 0
+                
+                # 1. 准备可视化数据
+                # 注意：save_board_with_heatmap 需要输入 [2, 15, 15] (黑白两通道)
+                # 直接取前两个通道
+                board_vis = batch_states[sample_idx, 0:2, :, :].cpu().numpy()
+                
+                # 2. 准备概率数据 (需要 Softmax 才是概率)
+                pred_board = p_logits[sample_idx].reshape(15, 15) 
+                pred_probs = F.softmax(p_logits[sample_idx], dim=0).cpu().numpy().reshape(15, 15)
+                
+                target_board = batch_actions[sample_idx].reshape(15, 15).cpu().numpy()
 
-                # network entropy
-                pred_entropy = -(
-                    pred_probs * torch.log(pred_probs + 1e-10)
-                ).sum(dim=1).mean()
+                # 3. 计算上一步位置
+                # 取第6个通道
+                last_move_tensor = batch_states[sample_idx, 6, :, :] 
+                
+                # 找到非零的坐标 (假设只有一个点为1)
+                last_coords = (last_move_tensor > 0).nonzero()
+                
+                last = None
+                if last_coords.nelement() > 0:
+                    # tensor.nonzero() 返回的是 (num_points, 2)，第一维是行，第二维是列
+                    coord = last_coords[0] 
+                    
+                    # ✅ coord 的第0个元素是行，第1个元素是列
+                    r = coord[0].item()
+                    c = coord[1].item()
+                    last = (r, c)
+                    last = (r, c)
+                else:
+                    print(f"Warning: No last move found in channel 6 for sample {sample_idx}")
 
-                # MCTS target entropy
-                target_entropy = -(
-                    batch_actions * torch.log(batch_actions + 1e-10)
-                ).sum(dim=1).mean()
+                # 2. 生成对比图 (推荐)
+                vis.save_side_by_side(
+                    pred_data=pred_board, 
+                    target_data=target_board, 
+                    table_name=f"Step", 
+                    epoch=0
+                )
+                vis.save_heatmap(pred_board, table_name=f"Step", epoch=0)
+                # vis.save_3d_bar_grid(pred_board, table_name=f"Step", epoch=0)
+                vis.save_board_with_heatmap(
+                    board_data=board_vis, 
+                    probs_data=pred_probs, 
+                    table_name="Step", 
+                    last_move=last
+                )
 
-                # ================= 新增诊断代码 =================
-                # 1. 计算 target (MCTS) 的动作数量和 Top-5
-                # batch_actions 形状是 (B, 225)
-                target_nonzero_counts = (batch_actions > 1e-6).sum(dim=1).float().mean() # 平均有多少个动作被赋予概率
-                target_top5_vals, _ = torch.topk(batch_actions, k=5, dim=1)
-                target_top5_mean = target_top5_vals.mean(dim=0) # 在 batch 维度求平均，得到 Top1-5 的平均概率
-
-                # 2. 计算 Pred (网络预测) 的动作数量和 Top-5
-                pred_nonzero_counts = (pred_probs > 1e-6).sum(dim=1).float().mean()
-                pred_top5_vals, _ = torch.topk(pred_probs, k=5, dim=1)
-                pred_top5_mean = pred_top5_vals.mean(dim=0)
-                # ==================================================
-
+                # 生成纯净棋盘（查看当前局面）
+                vis.save_raw_board(
+                    board_data=board_vis,
+                    table_name="Step",
+                    last_move=last
+                )
             # 修改打印格式
             print(
                 f"p_loss={policy_loss_ce.item():.4f} | "
                 f"v_loss={value_loss.item():.4f} | "
-                f"pred_entropy={pred_entropy.item():.4f} | "
-                f"tar_entropy={target_entropy.item():.4f} | "
-                #f"illegal={illegal_prob_sum.item():.4f} | "
+                # f"pred_entropy={pred_entropy.item():.4f} | "
+                # f"tar_entropy={target_entropy.item():.4f} | "
+                # #f"illegal={illegal_prob_sum.item():.4f} | "
                 
-                # 打印动作数量
-                f"pred_cnt={pred_nonzero_counts.item():.1f} | "
-                f"tar_cnt={target_nonzero_counts.item():.1f} | "
+                # # 打印动作数量
+                # f"pred_cnt={pred_nonzero_counts.item():.1f} | "
+                # f"tar_cnt={target_nonzero_counts.item():.1f} | "
                 
-                # 打印 Top-5 概率 (格式化更易读)
-                f"pred_top5={[f'{v:.3f}' for v in pred_top5_mean.cpu().numpy()]} | "
-                f"tar_top5={[f'{v:.3f}' for v in target_top5_mean.cpu().numpy()]}"
+                # # 打印 Top-5 概率 (格式化更易读)
+                # f"pred_top5={[f'{v:.3f}' for v in pred_top5_mean.cpu().numpy()]} | "
+                # f"tar_top5={[f'{v:.3f}' for v in target_top5_mean.cpu().numpy()]}"
             )
             self.optimizer.zero_grad()
             total_loss.backward()
