@@ -282,9 +282,9 @@ class MCTS():
         score = value
         v_loss = 1
         for node in reversed(path):  
-            if node.parent is not None: 
-                node.visits -= v_loss
-                node.score += v_loss
+            # if node.parent is not None: 
+            #     node.visits -= v_loss
+            #     node.score += v_loss
             
             node.visits += 1
             node.score += score
@@ -434,10 +434,10 @@ class MCTS():
         child = node.children[best_action]
 
        # virtual loss
-        v_loss = 1
+        # v_loss = 1
 
-        child.visits += v_loss
-        child.score -= v_loss
+        # child.visits += v_loss
+        # child.score -= v_loss
 
         return best_action, child
 
