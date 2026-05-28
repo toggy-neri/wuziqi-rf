@@ -380,11 +380,31 @@ class MCTS():
 
     def rollout(self, node):
         pass
-
+    
+    
+    def get_winning_moves(self, board: np.ndarray, player: int) -> np.ndarray:
+        """
+        向量化找必杀点（复用minimax里的逻辑），返回线性索引数组。
+        预计算WINDOWS已在minimax模块里，直接import复用，零额外开销。
+        """
+        from minimax import WINDOWS  # 预计算好的5格窗口，直接复用
+        flat = board.ravel()
+        opp  = -player
+        wv   = flat[WINDOWS]                          # (N_WIN, 5)
+        p_cnt = np.sum(wv == player, axis=1)
+        e_cnt = np.sum(wv == 0,      axis=1)
+        o_cnt = np.sum(wv == opp,    axis=1)
+        valid = (p_cnt == 4) & (e_cnt == 1) & (o_cnt == 0)
+        if not valid.any():
+            return np.array([], dtype=np.int32)
+        vw  = WINDOWS[valid]
+        vwv = wv[valid]
+        ei  = np.argmax(vwv == 0, axis=1)
+        return np.unique(vw[np.arange(len(vw)), ei]) 
 
 
     
-    def get_best_child(self, node, board, is_root,c_puct=1.5):
+    def get_best_child(self, node,  is_root,c_puct=1.5):
         c_puct = 3.0 if is_root else c_puct
     
         actions = node.actions
@@ -440,4 +460,145 @@ class MCTS():
         # child.score -= v_loss
 
         return best_action, child
+    def debug_tree(self, node, depth=0):
+        indent = "  " * depth
+
+        print(
+            f"{indent}N={node.visits} "
+            f"W={node.score:.2f}"
+        )
+
+        for action, child in node.children.items():
+
+            q = child.score / child.visits if child.visits > 0 else 0
+
+            print(
+                f"{indent}├─ action={action} "
+                f"N={child.visits} "
+                f"W={child.score:.2f} "
+                f"Q={q:.2f}"
+            )
+
+            self.debug_tree(child, depth+1)
+    
+# def main():
+#     env = WuziqiEnv()
+#     network = Network()
+#     mcts = MCTS(env, network)
+
+#     # ==================================
+#     # create root
+#     # ==================================
+#     root = TreeNode()
+
+#     root.is_visited = True
+#     root.visits = 30
+
+#     # action + prior probability
+#     root.actions = np.array([10, 20, 30, 40])
+
+#     root.probs = np.array([
+#         0.4,
+#         0.3,
+#         0.2,
+#         0.1
+#     ])
+
+#     # ==================================
+#     # create children
+#     # ==================================
+#     for a in root.actions:
+
+#         root.children[a] = TreeNode(parent=root)
+
+#     # ==================================
+#     # fake statistics
+#     # ==================================
+#     root.children[10].visits = 10
+#     root.children[10].score = 7.0
+
+#     root.children[20].visits = 5
+#     root.children[20].score = 4.0
+
+#     root.children[30].visits = 1
+#     root.children[30].score = 1.0
+
+#     root.children[40].visits = 0
+#     root.children[40].score = 0.0
+
+#     # ==================================
+#     # deeper tree
+#     # ==================================
+#     child_10 = root.children[10]
+
+#     child_10.actions = np.array([101, 102])
+#     child_10.probs = np.array([0.7, 0.3])
+#     child_10.is_visited = True
+
+#     child_10.children[101] = TreeNode(parent=child_10)
+#     child_10.children[102] = TreeNode(parent=child_10)
+
+#     child_10.children[101].visits = 6
+#     child_10.children[101].score = 5
+
+#     child_10.children[102].visits = 2
+#     child_10.children[102].score = -1
+
+#     # ==================================
+#     # print tree
+#     # ==================================
+#     print("\n================ TREE ================\n")
+
+#     mcts.debug_tree(root)
+
+#     # ==================================
+#     # test PUCT
+#     # ==================================
+#     print("\n================ SELECT ================\n")
+
+#     best_action, best_child = mcts.get_best_child(root,  is_root=True)
+
+#     print(f"\nBEST ACTION = {best_action}")
+
+#     # ==================================
+#     # test backpropagation
+#     # ==================================
+#     print("\n================ BACKPROP ================\n")
+
+#     path = [
+#         root,
+#         root.children[10],
+#         root.children[10].children[101]
+#     ]
+
+#     print("Before Backprop:\n")
+
+#     mcts.debug_tree(root)
+
+#     # leaf 赢
+#     mcts.backpropagate(path, 1)
+
+#     print("\nAfter Backprop:\n")
+
+#     mcts.debug_tree(root)
+
+# # ==================================
+# # test policy
+# # ==================================
+#     print("\n================ POLICY ================\n")
+
+#     p = mcts.get_policy(root, 15)
+
+#     nonzero = np.nonzero(p)[0]
+
+#     for idx in nonzero:
+
+#         print(
+#             f"action={idx:<3} "
+#             f"prob={p[idx]:.4f}"
+#         )
+
+
+# if __name__ == "__main__":
+#     main()
 
