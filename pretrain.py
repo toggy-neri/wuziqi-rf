@@ -78,7 +78,7 @@ class pretrainer:
 
             # 预先把验证集转成tensor，避免每次重复转换
             val_states  = torch.FloatTensor(np.array([s[0] for s in val_samples])).to(device)
-            val_actions = torch.LongTensor(np.array([np.argmax(s[1]) for s in val_samples])).to(device)
+            val_actions = torch.FloatTensor(np.array([s[1] for s in val_samples])).to(device)
             val_values  = torch.FloatTensor(np.array([s[2] for s in val_samples])).to(device).view(-1, 1)
 
             pretrain_optimizer = torch.optim.AdamW(self.network.parameters(), lr=0.005, weight_decay=1e-4)
@@ -108,38 +108,33 @@ class pretrainer:
                     ).copy().reshape(-1, self.board_size * self.board_size)
                     aug_states.append(rotated_states)
                     aug_actions.append(rotated_actions)
-                    #aug_values.append(values)
+                    aug_values.append(values)
 
                 aug_states  = np.concatenate(aug_states,  axis=0)
                 aug_actions = np.concatenate(aug_actions, axis=0)
-                #aug_values  = np.concatenate(aug_values,  axis=0)
+                aug_values  = np.concatenate(aug_values,  axis=0)
 
                 batch_states  = torch.FloatTensor(aug_states).to(device)
                 batch_actions = torch.FloatTensor(aug_actions).to(device)
-                batch_values  = torch.FloatTensor(values).to(device).view(-1, 1)
+                batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
 
                 p_logits, v = self.network(batch_states)
 
-                # label smoothing 防止过拟合
-             
-                value_loss = F.mse_loss(v[:batch_size], batch_values) 
+                value_loss = F.mse_loss(v, batch_values) 
 
-                pred_p = torch.exp(F.log_softmax(p_logits, dim=1))
                 occupied_mask = (batch_states[:, 0:1, :, :] + batch_states[:, 1:2, :, :] > 0).float()
                 occupied_mask = occupied_mask.view(-1, self.board_size * self.board_size) 
-                
-                masked_p_logits = p_logits.clone()
-                masked_p_logits[occupied_mask == 1] = -100
-                log_p = F.log_softmax(masked_p_logits, dim=1)
-                #pred_p = torch.exp(log_p)
-                policy_loss = -torch.mean(torch.sum(batch_actions * log_p, dim=1))
-                # 4. 计算网络在非法区域浪费的概率
-                # pred_p shape: (B, 225)
-                lambda_illegal = 10.0 
-                loss = policy_loss + 5 * value_loss
+
+                log_p = F.log_softmax(p_logits, dim=1)
+                policy_loss_ce = -torch.mean(torch.sum(batch_actions * log_p, dim=1))
+                illegal_penalty = (
+                    p_logits * occupied_mask
+                ).pow(2).mean()
+                policy_loss = policy_loss_ce
+                total_loss = 5 * value_loss + policy_loss_ce + 50 * illegal_penalty
 
                 pretrain_optimizer.zero_grad()
-                loss.backward()
+                total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), 1.0)
                 pretrain_optimizer.step()
 
@@ -148,7 +143,7 @@ class pretrainer:
                     self.network.eval()
                     with torch.no_grad():
             # network policy probs
-                        pred_probs = F.softmax(masked_p_logits, dim=1)
+                        pred_probs = F.softmax(p_logits, dim=1)
                         # 2. 计算 Pred (网络预测) 的动作数量和 Top-5
                         pred_nonzero_counts = (pred_probs > 1e-6).sum(dim=1).float().mean()
                         pred_top5_vals, _ = torch.topk(pred_probs, k=5, dim=1)
@@ -175,6 +170,7 @@ class pretrainer:
                         #f"pred_H={pred_entropy.item():.4f} | "
                         #f"tar_H={target_entropy.item():.4f} | "
                         f"illegal={illegal_prob_sum.item():.4f} | "
+                        f"illegal_penalty={illegal_penalty.item():.4f} | "
                         f"Top5_Hit={hit.item():.3f} | "       # 新指标
                         f"Tar_Prob={target_probs.item():.3f} | "  # 新指标
                         # 打印动作数量
@@ -197,6 +193,7 @@ class pretrainer:
                         val_batch_size = 64
                         val_policy_losses = []
                         val_value_losses  = []
+                        val_illegal_penalties = []
                         for start in range(0, len(val_samples), val_batch_size):
                             vs = val_states[start:start+val_batch_size]
                             va = val_actions[start:start+val_batch_size]
@@ -204,25 +201,21 @@ class pretrainer:
                             
                             vp_logits, vv_pred = self.network(vs)
                             
-                            # 1. 验证集也要加 Mask 
                             vs_occupied = (vs[:, 0:1, :, :] + vs[:, 1:2, :, :] > 0).float()
                             vs_occupied = vs_occupied.view(-1, self.board_size * self.board_size)
-                            vp_logits_masked = vp_logits.clone()
-                            vp_logits_masked[vs_occupied == 1] = -100
                             
-                            log_vp = F.log_softmax(vp_logits_masked, dim=1)
+                            log_vp = F.log_softmax(vp_logits, dim=1)
                             
-                            # 2. 关键修复：确保 va 的维度和 log_vp 匹配
                             if va.dim() == 1:
-                                # 如果 va 只是动作索引 [0-224]，转换成 one-hot [B, 225]
                                 va = F.one_hot(va, num_classes=self.board_size * self.board_size).float()
                             
-                            # 3. 计算验证集 KL 散度 (确保和训练集逻辑一致)
-                            val_policy_losses.append(F.kl_div(log_vp, va, reduction='batchmean').item())
+                            val_policy_losses.append(-torch.mean(torch.sum(va * log_vp, dim=1)).item())
                             val_value_losses.append(F.mse_loss(vv_pred, vv).item())
+                            val_illegal_penalties.append((vp_logits * vs_occupied).pow(2).mean().item())
                             
                         val_policy_loss = np.mean(val_policy_losses)
                         val_value_loss  = np.mean(val_value_losses)
+                        val_illegal_penalty = np.mean(val_illegal_penalties)
 
 
                     self.network.train()
@@ -230,12 +223,15 @@ class pretrainer:
                     print(f"pretrain step {step:4d} | "
                         f"train_policy {policy_loss.item():.4f} | train_value {value_loss.item():.4f} | "
                         f"val_policy {val_policy_loss:.4f} | val_value {val_value_loss:.4f} | "
-                        f" pred_entropy {pred_entropy.item():.4f} | illegal_prob_sum {illegal_prob_sum.item():.4f}")
+                        f"val_illegal_penalty {val_illegal_penalty:.4f} | "
+                        f"pred_entropy {pred_entropy.item():.4f} | illegal_prob_sum {illegal_prob_sum.item():.4f}")
 
                     with open(self.agent.LOG_FILE, 'a') as f:
                         f.write(f"current_time: {current_time}, total_time: {current_time-start_time}, "
                                 f"step {step}, train_policy {policy_loss.item():.4f}, "
-                                f"val_policy {val_policy_loss:.4f}, val_value {val_value_loss:.4f}\n")
+                                f"illegal_penalty {illegal_penalty.item():.4f}, "
+                                f"val_policy {val_policy_loss:.4f}, val_value {val_value_loss:.4f}, "
+                                f"val_illegal_penalty {val_illegal_penalty:.4f}\n")
 
                     # early stopping：以val_policy_loss为准
                     if val_policy_loss < best_val_loss - 0.001:
