@@ -9,6 +9,7 @@ from wuziqi_env import WuziqiEnv
 import torch
 import torch.nn.functional as F
 import numpy as np
+from minimax import WINDOWS
 import time
 
 #tree node definition
@@ -59,7 +60,10 @@ class MCTS():
             paths = []
             terminal_dones = []
             terminal_values = []
-            #depth first search the tree
+
+            need_network_indices = []   # 记录哪些叶节点需要走网络
+            rule_probs_cache     = {}   # {叶节点在列表中的index: rule_probs}   
+                #depth first search the tree
 
             for _ in range(batch_size):
                 path_len = 0
@@ -78,7 +82,6 @@ class MCTS():
                     is_root = (cur_node is node)
                     action, next_node = self.get_best_child(
                         cur_node,
-                        self.env.board,
                         is_root,
                         exploration_factor
                     )
@@ -116,6 +119,40 @@ class MCTS():
                 leaf_boards.append(self.env.board.copy())
                 paths.append(path)
 
+                current_idx = len(leaf_nodes) - 1
+                board_now     = self.env.board
+                cur_player    = self.env.current_player
+                if done:
+                    # 情况A：已终局，不需要网络，不需要规则
+                    terminal_dones[current_idx] = True
+                    terminal_values[current_idx] = v_terminal
+                    # 占位符，后续 expand 会处理 uniform
+                    rule_probs_cache[current_idx] = None 
+                
+                else:
+                    # 情况B：未终局，检查是否有杀棋
+                    # 这里检查的是 "当前轮到谁下，谁有没有杀招"
+                    win_moves = self.get_winning_moves(board_now, cur_player)
+                    
+                    if len(win_moves) > 0:
+                        # ✅ 命中规则：有杀棋
+                        #int(f"   [Rule] Killing move found for Player {cur_player}")
+                        
+                        # --- 关键修复：将坐标转换为概率数组 ---
+                        rule_prob = np.zeros(225, dtype=np.float32)
+                        rule_prob[win_moves] = 1.0  # 所有杀招位置概率为 1
+                        rule_prob = rule_prob / rule_prob.sum() # 归一化（如果有多个杀招）
+                        
+                        rule_probs_cache[current_idx] = rule_prob
+                        terminal_dones[current_idx] = True # 视为确定性节点
+                        terminal_values[current_idx] = 1.0 # 强行设定 Value 为 1
+                    else:
+                        # 情况C：没有杀棋，需要网络评估
+                        terminal_dones[current_idx] = False
+                        # --- 关键修复：只有在需要网络时才添加到 leaf_states ---
+                        leaf_states.append(self.env.get_channel_state(board_now, cur_player))
+
+
                 for _ in range(path_len):
                     self.env.undo()
                 #undo the path,aviod too much memory usage
@@ -130,9 +167,33 @@ class MCTS():
                 #     pass
                 
             # t1 = time.time()
+            network_probs = {}   # {index: prob_array}
+            network_values = {}  # {index: value}
+            if need_network_indices:
+                net_states = np.stack([leaf_states[i] for i in need_network_indices])
+                inputs = torch.from_numpy(net_states).to(device, non_blocking=True).float()
+                with torch.no_grad():
+                    policy_logits, v_net = self.network(inputs)
+                probs_batch = self.mask_and_softmax_batch(policy_logits).cpu().numpy()
 
-            states_np = np.stack(leaf_states)
-            inputs = torch.from_numpy(states_np).to(device, non_blocking=True).float()
+                for batch_pos, leaf_idx in enumerate(need_network_indices):
+                    board_i  = leaf_boards[leaf_idx]
+                    raw_prob = probs_batch[batch_pos]
+
+                    # 应用valid_mask
+                    valid_mask = self.get_valid_mask(board_i, radius=2)
+                    raw_prob   = raw_prob * valid_mask
+                    prob_sum   = raw_prob.sum()
+                    if prob_sum > 1e-8:
+                        raw_prob = raw_prob / prob_sum
+                    else:
+                        raw_prob = valid_mask / (valid_mask.sum() + 1e-8)
+
+                    network_probs[leaf_idx]  = raw_prob
+                    network_values[leaf_idx] = v_net[batch_pos].item()
+
+            # states_np = np.stack(leaf_states)
+            # inputs = torch.from_numpy(states_np).to(device, non_blocking=True).float()
             #inputs = torch.stack([torch.tensor(s.get_channel_state(s.board)) for s in leaf_states]).to(device)
             #done,winner = state._check_win(state.last_move)
             # with torch.no_grad():
@@ -142,31 +203,31 @@ class MCTS():
             # valid_mask_tensor = torch.tensor(valid_mask, dtype=policy.dtype, device=policy.device)
 
             # 张量相乘
-            # policy = policy * valid_mask_tensor
-            with torch.no_grad():
-                policy , v = self.network(inputs)
-            # 生成蒙版并应用
-            policy = self.mask_and_softmax_batch(policy)
-            valid_mask = self.get_valid_mask(self.env.board, radius=2)
-            valid_mask_tensor = torch.tensor(valid_mask, dtype=policy.dtype, device=policy.device)
-            policy = policy * valid_mask_tensor                    # 非法位置概率清零
-            policy_sum = policy.sum()
-            if policy_sum > 0:
-                policy = policy / policy_sum                # 重新归一化
-            else:
-                # 极端情况：蒙版全0，fallback到均匀分布
-                policy = valid_mask / valid_mask.sum()
-            # t2 = time.time()
+            # # policy = policy * valid_mask_tensor
+            # with torch.no_grad():
+            #     policy , v = self.network(inputs)
+            # # 生成蒙版并应用
+            # policy = self.mask_and_softmax_batch(policy)
+            # valid_mask = self.get_valid_mask(self.env.board, radius=2)
+            # valid_mask_tensor = torch.tensor(valid_mask, dtype=policy.dtype, device=policy.device)
+            # policy = policy * valid_mask_tensor                    # 非法位置概率清零
+            # policy_sum = policy.sum()
+            # if policy_sum > 0:
+            #     policy = policy / policy_sum                # 重新归一化
+            # else:
+            #     # 极端情况：蒙版全0，fallback到均匀分布
+            #     policy = valid_mask / valid_mask.sum()
+            # # t2 = time.time()
             
             # print(f"树搜索+copy: {t1-t0:.3f}s  |  网络推理: {t2-t1:.3f}s")
             #ta = time.time()
             # 从 leaf_states 提取 board 数组
             #boards = np.stack([s for s,_ in leaf_states])  # (batch_size, 15, 15)
-            probs = self.mask_and_softmax_batch(policy)
-            #tb = time.time()
-            probs = probs.cpu().numpy()
-            if(len(probs) == 0):
-                raise ValueError("probs is empty")
+            # probs = self.mask_and_softmax_batch(policy)
+            # #tb = time.time()
+            # probs = probs.cpu().numpy()
+            # if(len(probs) == 0):
+            #     raise ValueError("probs is empty")
             # top_probs,top_actions = torch.topk(probs,30,dim =1 )
             # top_probs = top_probs.cpu().numpy()
             # top_actions = top_actions.cpu().numpy()
@@ -179,15 +240,38 @@ class MCTS():
             for i,(leaf,path) in enumerate(zip(leaf_nodes,paths)):
                 #ta = time.time()
                 #get the top n moves
-                if terminal_dones[i]:
-                    real_v = terminal_values[i]
-                else:
-                    real_v = v[i].item()
+                # if terminal_dones[i]:
+                #     real_v = terminal_values[i]
+                # else:
+                #     real_v = v[i].item()
                 #tb = time.time()
                 # leaf.actions = np.arange(probs.shape[1])   # 所有动作索引
                 # leaf.probs = probs[i]                      # 对应概率
+                if terminal_dones[i] and i not in need_network_indices:
+                # 终局 or 规则命中
+                    real_v = terminal_values[i]
+                    if i in rule_probs_cache and rule_probs_cache[i] is not None:
+                        # 规则给的probs直接用
+                        final_probs = rule_probs_cache[i]
+                    else:
+                        # 真终局：uniform fallback
+                        valid_mask  = self.get_valid_mask(leaf_boards[i], radius=2)
+                        final_probs = valid_mask / (valid_mask.sum() + 1e-8)
+                else:
+                    # 网络给的结果
+                    real_v      = network_values.get(i, 0.0)
+                    final_probs = network_probs.get(i, None)
+                    if final_probs is None:
+                        valid_mask  = self.get_valid_mask(leaf_boards[i], radius=2)
+                        final_probs = valid_mask / (valid_mask.sum() + 1e-8)
+                if final_probs is not None:
+                    if len(final_probs) == 0:
+                        print(f"final_probs is None, i={i}")
 
-                self.expand_node(leaf, leaf_boards[i], probs[i]) 
+                if final_probs is None:
+                    print(f"final_probs is empty, i={i}")
+
+                self.expand_node(leaf, leaf_boards[i], final_probs) 
 
                 if(len(leaf.actions) == 0):
                     raise ValueError("leaf.actions is empty")
@@ -282,9 +366,9 @@ class MCTS():
         score = value
         v_loss = 1
         for node in reversed(path):  
-            # if node.parent is not None: 
-            #     node.visits -= v_loss
-            #     node.score += v_loss
+            if node.parent is not None: 
+                node.visits -= v_loss
+                node.score += v_loss
             
             node.visits += 1
             node.score += score
@@ -454,10 +538,10 @@ class MCTS():
         child = node.children[best_action]
 
        # virtual loss
-        # v_loss = 1
+        v_loss = 1
 
-        # child.visits += v_loss
-        # child.score -= v_loss
+        child.visits += v_loss
+        child.score -= v_loss
 
         return best_action, child
     def debug_tree(self, node, depth=0):

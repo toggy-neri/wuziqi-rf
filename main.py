@@ -188,8 +188,8 @@ class Agent:
                 current_time = datetime.now()
                 #print( f"Time: {current_time.strftime(DATE_FORMAT)}")
                 if self.is_self_play or not self.is_training:
-                    winning_moves = self.get_winning_moves(env.board, env.current_player)
-                    defend_moves  = self.get_winning_moves(env.board, -env.current_player)
+                    winning_moves = mcts.get_winning_moves(env.board, env.current_player)
+                    defend_moves  = mcts.get_winning_moves(env.board, -env.current_player)
                     if len(winning_moves) > 0:
                         # 己方有必杀点，直接赢
                         forced_moves = winning_moves
@@ -526,14 +526,14 @@ class Agent:
             #illegal_mask = torch.clamp(occupied_mask + island_mask, min=0.0, max=1.0)
 
             #legal_mask = 1.0 - occupied_mask
-            masked_p_logits = p_logits.clone()
-            masked_p_logits = torch.where(
-                occupied_mask == 1.0, 
-                torch.full_like(p_logits, -1e9), 
-                p_logits
-            )
+            # masked_p_logits = p_logits.clone()
+            # masked_p_logits = torch.where(
+            #     occupied_mask == 1.0, 
+            #     torch.full_like(p_logits, -1e9), 
+            #     p_logits
+            # )
             
-            log_p = F.log_softmax(masked_p_logits, dim=1)
+            log_p = F.log_softmax(p_logits, dim=1)
             #pred_p = F.softmax(p_logits, dim=1)
             
             
@@ -542,10 +542,13 @@ class Agent:
             )
             # 4. 计算网络在非法区域浪费的概率
             # pred_p shape: (B, 225)
+            illegal_penalty = (
+                p_logits * occupied_mask
+            ).pow(2).mean()
             #illegal_prob_sum = torch.sum(pred_p * occupied_mask, dim=1).mean()
             #lambda_illegal = 10.0 
             policy_loss = policy_loss_ce
-            total_loss = 5 * value_loss + policy_loss_ce #+ lambda_illegal * illegal_prob_sum
+            total_loss = 5 * value_loss + policy_loss_ce + 10*illegal_penalty
             #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
                         # =========================
             # entropy monitoring
@@ -602,48 +605,48 @@ class Agent:
 
             # ... 训练循环中 ...
             with torch.no_grad():
-                sample_idx = 0
-                state = batch_states[sample_idx] # [8, 15, 15]
+                # sample_idx = 0
+                # state = batch_states[sample_idx] # [8, 15, 15]
                 
-                # === DEBUG 代码：打印 Mask 信息 ===
-                # 1. 检查原始通道数据
-                black_pieces = state[0] # 黑棋通道
-                white_pieces = state[1] # 白棋通道
-                occupied_raw = (black_pieces + white_pieces) # 有棋子的地方 > 0
+                # # === DEBUG 代码：打印 Mask 信息 ===
+                # # 1. 检查原始通道数据
+                # black_pieces = state[0] # 黑棋通道
+                # white_pieces = state[1] # 白棋通道
+                # occupied_raw = (black_pieces + white_pieces) # 有棋子的地方 > 0
                 
-                # 2. 检查你训练代码里计算出的 occupied_mask (假设你之前重建了它)
-                # 这里我重新生成一遍标准逻辑来对比
-                occupied_mask_calc = (state[0] + state[1] > 0).float()
-                occupied_mask_calc = occupied_mask_calc.view(-1) # 展平成 225 维
+                # # 2. 检查你训练代码里计算出的 occupied_mask (假设你之前重建了它)
+                # # 这里我重新生成一遍标准逻辑来对比
+                # occupied_mask_calc = (state[0] + state[1] > 0).float()
+                # occupied_mask_calc = occupied_mask_calc.view(-1) # 展平成 225 维
                 
-                print(f"\n--- Debugging Mask for Sample {sample_idx} ---")
-                print(f"Total Pieces on Board: {occupied_raw.sum().item()}")
-                print(f"Occupied Mask Sum (Should be > 0): {occupied_mask_calc.sum().item()}")
+                # print(f"\n--- Debugging Mask for Sample {sample_idx} ---")
+                # print(f"Total Pieces on Board: {occupied_raw.sum().item()}")
+                # print(f"Occupied Mask Sum (Should be > 0): {occupied_mask_calc.sum().item()}")
                 
-                # 3. 检查原始 logits
-                raw_logits = p_logits[sample_idx] # [225]
-                print(f"Raw Logits Max: {raw_logits.max().item():.4f}")
-                print(f"Raw Logits Min: {raw_logits.min().item():.4f}")
+                # # 3. 检查原始 logits
+                # raw_logits = p_logits[sample_idx] # [225]
+                # print(f"Raw Logits Max: {raw_logits.max().item():.4f}")
+                # print(f"Raw Logits Min: {raw_logits.min().item():.4f}")
                 
-                # 4. 模拟 Mask 操作 (这就是你代码里干的事)
-                masked_logits_test = torch.where(occupied_mask_calc == 1.0, torch.full_like(raw_logits, -1e9), raw_logits)
-                print(f"Masked Logits Max: {masked_logits_test.max().item():.4f}")
-                print(f"Masked Logits Min: {masked_logits_test.min().item():.4f}")
+                # # 4. 模拟 Mask 操作 (这就是你代码里干的事)
+                # masked_logits_test = torch.where(occupied_mask_calc == 1.0, torch.full_like(raw_logits, -1e9), raw_logits)
+                # print(f"Masked Logits Max: {masked_logits_test.max().item():.4f}")
+                # print(f"Masked Logits Min: {masked_logits_test.min().item():.4f}")
                 
-                # 5. 检查 Softmax 结果
-                probs = F.softmax(masked_logits_test, dim=0)
-                print(f"Probs Sum (Should be 1.0): {probs.sum().item():.6f}")
+                # # 5. 检查 Softmax 结果
+                # probs = F.softmax(masked_logits_test, dim=0)
+                # print(f"Probs Sum (Should be 1.0): {probs.sum().item():.6f}")
                 
-                # 6. 致命检查：有棋子的地方，概率是多少？
-                prob_at_occupied = (probs * occupied_mask_calc).sum().item()
-                print(f"PROBABILITY AT OCCUPIED SPOTS: {prob_at_occupied:.6f} (期望值: 0.0000)")
+                # # 6. 致命检查：有棋子的地方，概率是多少？
+                # prob_at_occupied = (probs * occupied_mask_calc).sum().item()
+                # print(f"PROBABILITY AT OCCUPIED SPOTS: {prob_at_occupied:.6f} (期望值: 0.0000)")
                 
-                # 如果这里输出了大于 0.00001 的数字，说明 Mask 失败或者白做了
-                if prob_at_occupied > 0.001:
-                    print("❌ BUG CONFIRMED: AI is predicting moves on occupied spots!")
-                else:
-                    print("✅ Mask works in simulation, check Loss calculation.")
-                    
+                # # 如果这里输出了大于 0.00001 的数字，说明 Mask 失败或者白做了
+                # if prob_at_occupied > 0.001:
+                #     print("❌ BUG CONFIRMED: AI is predicting moves on occupied spots!")
+                # else:
+                #     print("✅ Mask works in simulation, check Loss calculation.")
+
                 # 1. 画单个样本的预测分布 (比如画 Batch 里的第 0 个样本)
                 sample_idx = 0
                 
@@ -704,6 +707,7 @@ class Agent:
             print(
                 f"p_loss={policy_loss_ce.item():.4f} | "
                 f"v_loss={value_loss.item():.4f} | "
+                f"illegal_penalty={illegal_penalty.item():.4f} | "
                 # f"pred_entropy={pred_entropy.item():.4f} | "
                 # f"tar_entropy={target_entropy.item():.4f} | "
                 # #f"illegal={illegal_prob_sum.item():.4f} | "
@@ -804,26 +808,7 @@ class Agent:
             param.requires_grad = requires_grad
         state = "解冻" if requires_grad else "冻结"
         print(f"残差塔已{state}")
-
-    def get_winning_moves(self, board: np.ndarray, player: int) -> np.ndarray:
-        """
-        向量化找必杀点（复用minimax里的逻辑），返回线性索引数组。
-        预计算WINDOWS已在minimax模块里，直接import复用，零额外开销。
-        """
-        from minimax import WINDOWS  # 预计算好的5格窗口，直接复用
-        flat = board.ravel()
-        opp  = -player
-        wv   = flat[WINDOWS]                          # (N_WIN, 5)
-        p_cnt = np.sum(wv == player, axis=1)
-        e_cnt = np.sum(wv == 0,      axis=1)
-        o_cnt = np.sum(wv == opp,    axis=1)
-        valid = (p_cnt == 4) & (e_cnt == 1) & (o_cnt == 0)
-        if not valid.any():
-            return np.array([], dtype=np.int32)
-        vw  = WINDOWS[valid]
-        vwv = wv[valid]
-        ei  = np.argmax(vwv == 0, axis=1)
-        return np.unique(vw[np.arange(len(vw)), ei])   # 去重后的必杀点
+  # 去重后的必杀点
 def play_gui():
     game = WuziqiGUI(board_size=15, cell_size=40)
     game.run()
