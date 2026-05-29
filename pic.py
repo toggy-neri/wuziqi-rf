@@ -183,7 +183,7 @@ class PolicyVisualizer:
         ax.set_yticks(np.arange(15))
         ax.set_xticklabels(np.arange(15))
         ax.set_yticklabels(np.arange(15))
-        ax.invert_yaxis() # 反转 Y 轴，左上角为 (0,0)
+        ax.invert_yaxis()
         
         ax.set_title(f"{table_name} | Prob Overlay")
         
@@ -218,7 +218,6 @@ class PolicyVisualizer:
         ax.set_xticklabels(np.arange(15))
         ax.set_yticklabels(np.arange(15))
         ax.grid(True, color='black', linestyle='-', linewidth=0.5, alpha=0.3)
-        ax.invert_yaxis()
         
         # 隐藏刻度数字，只保留网格
         ax.tick_params(axis='both', which='both', labelbottom=False, labelleft=False)
