@@ -122,6 +122,8 @@ class MCTS():
                 current_idx = len(leaf_nodes) - 1
                 board_now     = self.env.board
                 cur_player    = self.env.current_player
+                #print(board_now)
+                #time.sleep(0.5)
                 if done:
                     # 情况A：已终局，不需要网络，不需要规则
                     terminal_dones[current_idx] = True
@@ -150,7 +152,7 @@ class MCTS():
                         # 情况C：没有杀棋，需要网络评估
                         terminal_dones[current_idx] = False
                         # --- 关键修复：只有在需要网络时才添加到 leaf_states ---
-                        leaf_states.append(self.env.get_channel_state(board_now, cur_player))
+                        need_network_indices.append(current_idx)
 
 
                 for _ in range(path_len):
@@ -368,7 +370,7 @@ class MCTS():
         for node in reversed(path):  
             if node.parent is not None: 
                 node.visits -= v_loss
-                node.score += v_loss
+                node.score += 0.1
             
             node.visits += 1
             node.score += score
@@ -541,7 +543,7 @@ class MCTS():
         v_loss = 1
 
         child.visits += v_loss
-        child.score -= v_loss
+        child.score -= 0.1
 
         return best_action, child
     def debug_tree(self, node, depth=0):
