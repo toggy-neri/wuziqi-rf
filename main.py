@@ -5,6 +5,7 @@ import time
 import yaml
 import os
 import pickle
+import json
 
 #chess GUI
 from pic import PolicyVisualizer
@@ -74,10 +75,60 @@ class Agent:
         self.BEST_MODEL_FILE_RESTORE = os.path.join(self.restore_dir, f'{hyperparameters_set}_best.pt')
         self.LOG_FILE = os.path.join(self.restore_dir, f'{hyperparameters_set}.txt')
         self.LOG_FILE_OPTIMIZE = os.path.join(self.restore_dir, f'{hyperparameters_set}_optimize.txt')  
+        self.TRAINING_DATA_LOG = os.path.join(self.restore_dir, f'{hyperparameters_set}_training_data.log')
 
         self.MEMORY_FILE = os.path.join(self.restore_dir, f'{self.exist_model_name}_memory.pkl') 
         os.makedirs(self.restore_dir, exist_ok=True)
         #self.GRAPH_FILE = os.path.join(self.run_dir, f'{hyperparameters_set}.png')
+
+    def _reset_training_data_log_if_needed(self, training_index):
+        if (training_index - 1) % 5 != 0:
+            return
+
+        with open(self.TRAINING_DATA_LOG, 'w', encoding='utf-8') as f:
+            f.write(f"# training data log reset at training {training_index}, time={datetime.now().strftime(DATE_FORMAT)}\n")
+
+    def _build_training_step_log(self, step, player, action, board_before, policy, reward, done, info, board_after):
+        if action is None:
+            position = None
+            action_value = None
+        else:
+            row, col = divmod(int(action), self.board_size)
+            position = [int(row), int(col)]
+            action_value = int(action)
+
+        return {
+            "step": int(step),
+            "player": int(player),
+            "action": action_value,
+            "position": position,
+            "board_before": board_before.tolist(),
+            "board_after": board_after.tolist(),
+            "policy": policy.tolist(),
+            "reward": float(reward),
+            "done": bool(done),
+            "info": info,
+        }
+
+    def _json_default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        return str(obj)
+
+    def _write_training_data_log(self, training_index, winner, steps, epoch_time):
+        record = {
+            "training": int(training_index),
+            "time": datetime.now().strftime(DATE_FORMAT),
+            "winner": int(winner) if winner is not None else None,
+            "epoch_time": float(epoch_time),
+            "steps": steps,
+        }
+        with open(self.TRAINING_DATA_LOG, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=self._json_default) + "\n")
         
     def run(self,is_training=True,render=False):
         #create environment
@@ -161,6 +212,8 @@ class Agent:
         policy_loss = float('inf')
         value_loss = float('inf')
         best_loss = float('inf')
+        memory_extract_var = 1
+        low_policy_loss_streak = 0
 
         ai_wins = 0
         minimax_wins = 0
@@ -169,12 +222,16 @@ class Agent:
         #for i in range(self.self_play_num):
         for i in range(self.self_play_num):
             #time.sleep(5)
+            training_index = i + 1
+            if is_training:
+                self._reset_training_data_log_if_needed(training_index)
             time_start = time.time()
             root = TreeNode(parent=None)
             game_history = []
             state = env.reset()
             done = False
             current_step = 0
+            training_steps_log = []
             #flag = 0
             if not self.is_self_play:
                 import random
@@ -224,8 +281,19 @@ class Agent:
                         #t2 = time.time()
                         root.parent = None
                     #step forward
+                    board_before = env.board.copy()
+                    step_player = env.current_player
+                    # if len(forced_moves) > 0:
                     game_history.append((state.copy(),policy.copy(),env.current_player,env.last_move))
                     state, reward, done, info = env.step(action)  
+                    
+                    if is_training:
+                        training_steps_log.append(
+                            self._build_training_step_log(
+                                current_step, step_player, action, board_before, policy,
+                                reward, done, info, state.copy()
+                            )
+                        )
                 else:
                     if env.current_player == minimax_player:   # 黑方 = minimax
                         action, policy_matrix = minimax.get_minimax_action(
@@ -240,9 +308,18 @@ class Agent:
                         policy = mcts.get_policy(root, self.board_size)
                         action, root = mcts.choose(root, is_training,current_step=current_step)
                     #print(env.board)
-                    if env.current_player == minimax_player:
-                            game_history.append((state.copy(),policy.copy(),-env.current_player,env.last_move))
+                    board_before = env.board.copy()
+                    step_player = env.current_player
+                    if env.current_player == minimax_player :
+                        game_history.append((state.copy(),policy.copy(),-env.current_player,env.last_move))
                     state, reward, done, info = env.step(action)  
+                    if is_training:
+                        training_steps_log.append(
+                            self._build_training_step_log(
+                                current_step, step_player, action, board_before, policy,
+                                reward, done, info, state.copy()
+                            )
+                        )
                     #print(env.board)
                         
                         
@@ -280,7 +357,9 @@ class Agent:
                     #     dr = draws / total_games * 100
                     #     print(f"[对局 {total_games}] 🤖 AI胜率: {ai_wr:.1f}% ({ai_wins}胜) | 🧠 Minimax胜率: {mm_wr:.1f}% ({minimax_wins}胜) | 🤝 平局: {dr:.1f}%")
                     # # ============================================
-                    for s,p,player,last_move in game_history:  #注意不要保证重名
+                    tail_count = min(len(game_history), memory_extract_var)
+                    selected_history = game_history[-tail_count:] if tail_count > 0 else []
+                    for s,p,player,last_move in selected_history:  #注意不要保证重名
                         #print(s)
                         # if not self.is_self_play:
                         #     value = 1 if player == winner else (-1+discount)
@@ -291,6 +370,8 @@ class Agent:
                         memory.append((ch_state, p,value))
                         # if len(memory) >= self.replay_memory_size:
                         #     self.optimize(memory, self.optimizer_batch_size
+                    if is_training:
+                        self._write_training_data_log(training_index, winner, training_steps_log, time.time() - time_start)
                     game_history = []
                     break
 
@@ -310,6 +391,13 @@ class Agent:
                     print(f"Memory too small ({len(memory)}), skipping training")
                     continue
                 value_loss,policy_loss = self.optimize(memory, self.optimizer_batch_size)
+                if policy_loss < 2:
+                    low_policy_loss_streak += 1
+                    if low_policy_loss_streak >= 10:
+                        memory_extract_var += 1
+                        low_policy_loss_streak = 0
+                else:
+                    low_policy_loss_streak = 0
 
                 print(f"current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}")
 
@@ -542,13 +630,15 @@ class Agent:
             )
             # 4. 计算网络在非法区域浪费的概率
             # pred_p shape: (B, 225)
-            illegal_penalty = (
-                p_logits * occupied_mask
-            ).pow(2).mean()
-            #illegal_prob_sum = torch.sum(pred_p * occupied_mask, dim=1).mean()
+            pred_probs = F.softmax(p_logits, dim=1)
+            # illegal_penalty = (
+            #     p_logits * occupied_mask
+            # ).pow(2).mean()
+            illegal_prob_sum = torch.sum(pred_probs * occupied_mask, dim=1).mean()
+            #illegal_prob_sum = torch.sum(log_p * occupied_mask, dim=1).mean()
             #lambda_illegal = 10.0 
             policy_loss = policy_loss_ce
-            total_loss = 5 * value_loss + policy_loss_ce + 10*illegal_penalty
+            total_loss = 5 * value_loss + policy_loss_ce + 100*illegal_prob_sum
             #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
                         # =========================
             # entropy monitoring
@@ -698,16 +788,16 @@ class Agent:
                 )
 
                 # 生成纯净棋盘（查看当前局面）
-                vis.save_raw_board(
-                    board_data=board_vis,
-                    table_name="Step",
-                    last_move=last
-                )
+                # vis.save_raw_board(
+                #     board_data=board_vis,
+                #     table_name="Step",
+                #     last_move=last
+                # )
             # 修改打印格式
             print(
                 f"p_loss={policy_loss_ce.item():.4f} | "
                 f"v_loss={value_loss.item():.4f} | "
-                f"illegal_penalty={illegal_penalty.item():.4f} | "
+                f"illegal_penalty={illegal_prob_sum.item():.4f} | "
                 # f"pred_entropy={pred_entropy.item():.4f} | "
                 # f"tar_entropy={target_entropy.item():.4f} | "
                 # #f"illegal={illegal_prob_sum.item():.4f} | "
