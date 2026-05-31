@@ -127,11 +127,13 @@ class pretrainer:
 
                 log_p = F.log_softmax(p_logits, dim=1)
                 policy_loss_ce = -torch.mean(torch.sum(batch_actions * log_p, dim=1))
-                illegal_penalty = (
-                    p_logits * occupied_mask
-                ).pow(2).mean()
+                # illegal_penalty = (
+                #     p_logits * occupied_mask
+                # ).pow(2).mean()
                 policy_loss = policy_loss_ce
-                total_loss = 5 * value_loss + policy_loss_ce + 50 * illegal_penalty
+                pred_probs = F.softmax(p_logits, dim=1)
+                illegal_prob_sum = torch.sum(pred_probs * occupied_mask, dim=1).mean()
+                total_loss = 5 * value_loss + policy_loss_ce  + 10 * illegal_prob_sum
 
                 pretrain_optimizer.zero_grad()
                 total_loss.backward()
@@ -170,7 +172,7 @@ class pretrainer:
                         #f"pred_H={pred_entropy.item():.4f} | "
                         #f"tar_H={target_entropy.item():.4f} | "
                         f"illegal={illegal_prob_sum.item():.4f} | "
-                        f"illegal_penalty={illegal_penalty.item():.4f} | "
+                        #f"illegal_penalty={illegal_penalty.item():.4f} | "
                         f"Top5_Hit={hit.item():.3f} | "       # 新指标
                         f"Tar_Prob={target_probs.item():.3f} | "  # 新指标
                         # 打印动作数量
@@ -229,7 +231,7 @@ class pretrainer:
                     with open(self.agent.LOG_FILE, 'a') as f:
                         f.write(f"current_time: {current_time}, total_time: {current_time-start_time}, "
                                 f"step {step}, train_policy {policy_loss.item():.4f}, "
-                                f"illegal_penalty {illegal_penalty.item():.4f}, "
+                                #f"illegal_penalty {illegal_penalty.item():.4f}, "
                                 f"val_policy {val_policy_loss:.4f}, val_value {val_value_loss:.4f}, "
                                 f"val_illegal_penalty {val_illegal_penalty:.4f}\n")
 
