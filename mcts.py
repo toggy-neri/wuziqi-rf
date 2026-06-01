@@ -276,6 +276,7 @@ class MCTS():
                 self.expand_node(leaf, leaf_boards[i], final_probs) 
 
                 if(len(leaf.actions) == 0):
+                    break
                     raise ValueError("leaf.actions is empty")
                 #print(leaf.actions)
                 #print(leaf.probs)
@@ -393,6 +394,7 @@ class MCTS():
                 visits.append(child.visits)
                 
             if len(actions) == 0:
+                return None, None
                 raise ValueError("actions is empty")
                 
             visits = np.array(visits, dtype=np.float64)

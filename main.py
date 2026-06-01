@@ -212,7 +212,7 @@ class Agent:
         policy_loss = float('inf')
         value_loss = float('inf')
         best_loss = float('inf')
-        memory_extract_var = 1
+        memory_extract_var = 4
         low_policy_loss_streak = 0
 
         ai_wins = 0
@@ -284,6 +284,7 @@ class Agent:
                     board_before = env.board.copy()
                     step_player = env.current_player
                     # if len(forced_moves) > 0:
+
                     game_history.append((state.copy(),policy.copy(),env.current_player,env.last_move))
                     state, reward, done, info = env.step(action)  
                     
@@ -364,7 +365,10 @@ class Agent:
                         # if not self.is_self_play:
                         #     value = 1 if player == winner else (-1+discount)
                         # else:
-                        value = 1 if player == winner else -1
+                        if winner == 0:
+                            value = 0
+                        else:
+                            value = 1 if player == winner else -1
                         ch_state = env.get_channel_state(s,player)
                         #print(f"Policy Max Prob: {np.max(p):.4f}, Non-zero actions: {np.count_nonzero(p)}")
                         memory.append((ch_state, p,value))
@@ -391,21 +395,24 @@ class Agent:
                     print(f"Memory too small ({len(memory)}), skipping training")
                     continue
                 value_loss,policy_loss = self.optimize(memory, self.optimizer_batch_size)
-                if policy_loss < 2:
+                if policy_loss < 2 and value_loss < 0.5:
                     low_policy_loss_streak += 1
                     if low_policy_loss_streak >= 10:
                         memory_extract_var += 1
+                        print(f"memory_extract_var up: {memory_extract_var}")
+                        with open(self.LOG_FILE, 'a') as f:
+                            f.write(f"new best.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, now_extract_var: {memory_extract_var}\n")
                         low_policy_loss_streak = 0
                 else:
                     low_policy_loss_streak = 0
 
                 print(f"current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}")
 
-            if policy_loss < best_loss:
-                best_loss = policy_loss
-                with open(self.LOG_FILE, 'a') as f:
-                    f.write(f"new best.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}\n")
-                    torch.save(self.network.state_dict(), self.BEST_MODEL_FILE_RESTORE)
+            # if policy_loss < best_loss:
+            #     best_loss = policy_loss
+            #     with open(self.LOG_FILE, 'a') as f:
+            #         f.write(f"new best.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}\n")
+            #         torch.save(self.network.state_dict(), self.BEST_MODEL_FILE_RESTORE)
             if restore_count % self.restore_epoch == 0:
 
                 with open(self.LOG_FILE, 'a') as f:

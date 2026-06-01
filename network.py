@@ -55,7 +55,7 @@ class Network(nn.Module):
         p = self.policy_fc(p)
 
         #value output
-        v = torch.tanh(self.bn_value(self.value_head(x)))
+        v = self.bn_value(self.value_head(x))
         v = v.view(-1, 2*self.board_size*self.board_size)
         v = F.relu(self.value_fc1(v))
         v = torch.tanh(self.value_fc2(v))
