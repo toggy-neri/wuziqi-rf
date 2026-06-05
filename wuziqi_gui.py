@@ -1,6 +1,7 @@
 import pygame
 import sys
 import threading
+import torch
 
 from typing import Tuple, Optional
 from wuziqi_env import WuziqiEnv
@@ -203,7 +204,6 @@ class AiMatch:
             'thinking': (200, 80, 80),   
         }
 
-
         self.mcts = MCTS(network,self.env,False)
         self.mcts_ai = MCTS(network,self.env, False)
         self.font = pygame.font.Font(None, 36)
@@ -214,11 +214,15 @@ class AiMatch:
         self.is_ai_thinking = False
         self.ai_thread = None   
         self.pending_move = None
+        self.hover_winrate_cache = {}
 
-        self.human_player = 1  #todo 设置为-1会导致下不了棋
+        # Hard-coded side assignment: env.reset() starts player 1, so -1 means AI goes first.
+        self.human_player = -1
+        self.ai_player = -self.human_player
         self.root = TreeNode(parent=None)
 
         self.env.reset()
+        self.start_ai_turn_if_needed()
     
     def screen_to_board(self, pos: Tuple[int, int]) -> Optional[Tuple[int, int]]:
         x, y = pos
@@ -268,9 +272,74 @@ class AiMatch:
             x = self.margin + col * self.cell_size
             y = self.margin + row * self.cell_size
             pygame.draw.circle(self.screen, self.colors['highlight'], (x,y), self.cell_size // 2 - 2)
+
+    def should_show_hover_winrate(self):
+        if self.env.done or self.is_ai_thinking:
+            return False
+        if self.env.current_player != self.human_player:
+            return False
+        if not self.env.move_memory:
+            return False
+        return self.env.move_memory[-1][1] == self.ai_player
+
+    def value_to_winrate(self, value):
+        value = max(-1.0, min(1.0, float(value)))
+        return (value + 1.0) / 2.0
+
+    def evaluate_human_winrate_after_human_move(self, action):
+        child = self.root.children.get(action)
+        if child is not None and child.visits > 0:
+            return self.value_to_winrate(-(child.score / child.visits)), "MCTS"
+
+        trial_env = self.env.copy()
+        _, _, done, info = trial_env.step(action)
+        if done:
+            winner = info.get("winner")
+            if winner == self.human_player:
+                return 1.0, "Terminal"
+            if winner == self.ai_player:
+                return 0.0, "Terminal"
+            return 0.5, "Terminal"
+
+        state = trial_env.get_channel_state(trial_env.board, trial_env.current_player)
+        inputs = torch.from_numpy(state).unsqueeze(0).float()
+        try:
+            model_device = next(self.mcts_ai.network.parameters()).device
+            inputs = inputs.to(model_device)
+        except StopIteration:
+            pass
+
+        with torch.no_grad():
+            _, value = self.mcts_ai.network(inputs)
+
+        value = float(value.squeeze().item())
+        if trial_env.current_player != self.human_player:
+            value = -value
+        return self.value_to_winrate(value), "Network"
+
+    def get_hover_winrate(self, mouse_pos):
+        if not self.should_show_hover_winrate():
+            return None
+
+        board_pos = self.screen_to_board(mouse_pos)
+        if board_pos is None:
+            return None
+
+        row, col = board_pos
+        if not self.env._is_valid_move(row, col):
+            return None
+
+        action = row * self.env.board_size + col
+        if action not in self.hover_winrate_cache:
+            self.hover_winrate_cache[action] = self.evaluate_human_winrate_after_human_move(action)
+
+        winrate, source = self.hover_winrate_cache[action]
+        return row, col, winrate, source
             
     def draw_ui(self):
-        y_offset = self.margin + self.board_size * self.cell_size + 10
+        board_bottom = self.margin + (self.board_size - 1) * self.cell_size + self.cell_size // 2
+        hover_y = board_bottom + 18
+        status_y = hover_y + 38
 
         if self.env.done:
             if self.env.winner == self.human_player:
@@ -288,8 +357,16 @@ class AiMatch:
             color = self.colors['text']
 
         text_surface = self.font.render(text, True, color)
-        text_rect = text_surface.get_rect(center=(self.window_size[0] // 2, y_offset+15))
+        text_rect = text_surface.get_rect(center=(self.window_size[0] // 2, status_y))
         self.screen.blit(text_surface, text_rect)
+
+        hover_info = self.get_hover_winrate(pygame.mouse.get_pos())
+        if hover_info is not None:
+            row, col, winrate, source = hover_info
+            hover_text = f"Human win rate if you play ({row + 1},{col + 1}): {winrate * 100:.1f}% [{source}]"
+            hover_surface = self.small_font.render(hover_text, True, self.colors['text'])
+            hover_rect = hover_surface.get_rect(center=(self.window_size[0] // 2, hover_y))
+            self.screen.blit(hover_surface, hover_rect)
 
         mouse_pos = pygame.mouse.get_pos()
         btn_color = self.colors['button_hover'] if self.button_rect.collidepoint(mouse_pos) else self.colors['button']
@@ -304,6 +381,12 @@ class AiMatch:
         self.root = TreeNode(parent=None)
         self.is_ai_thinking = False
         self.pending_move = None
+        self.hover_winrate_cache.clear()
+        self.start_ai_turn_if_needed()
+
+    def start_ai_turn_if_needed(self):
+        if not self.env.done and self.env.current_player != self.human_player:
+            self.trigger_ai()
 
     def trigger_ai(self):
         self.mcts_ai.env = self.env.copy()
@@ -336,13 +419,15 @@ class AiMatch:
         col = board_pos[1]
         if not self.env._is_valid_move(row,col):
             return
-        if board_pos in self.root.children:
-            self.root = self.root.children[board_pos]
+        action = row*self.env.board_size+col
+        self.hover_winrate_cache.clear()
+        if action in self.root.children:
+            self.root = self.root.children[action]
             self.root.parent = None
         else:
             self.root = TreeNode(parent=None)
 
-        _,_,done,_ = self.env.step(row*self.env.board_size+col)
+        _,_,done,_ = self.env.step(action)
         if not done:
             self.trigger_ai()
 
@@ -361,6 +446,7 @@ class AiMatch:
                 self.pending_move = None
 
                 self.is_ai_thinking = False
+                self.hover_winrate_cache.clear()
             self.draw_board()
             self.draw_pieces()
 
