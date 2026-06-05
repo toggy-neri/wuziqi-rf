@@ -1,26 +1,50 @@
-alphaTao-v0.9:
+alphaTao-v1.0:
   is_pretrain: false
   pretrain_steps: 5000
   pretrain_file: 'minimax_data1.pkl'
   optimizer_batch_size: 64
-  inference_batch_size: 64
+  inference_batch_size: 32
   replay_memory_size: 2000
-  exist_model_name: 'alphaTao-v0.9'
-  run_dir: 'runs\alphaTao-v0.9'
-  restore_dir: 'runs\alphaTao-v0.9'
-  exploration_factor: 2.5
+  exist_model_name: 'alphaTao-v1.0'
+  run_dir: 'runs\alphaTao-v1.0'
+  restore_dir: 'runs\alphaTao-v1.0'
+  exploration_factor: 1
   is_self_play: true
-  self_play_num: 800
+  self_play_num: 12000
   board_size: 15
   residual_blocks: 10
   update_freq: 2
   warmup_steps: 0
   restore_epoch: 25
-  search_num: 300
-  is_continue_training: false
+  search_num: 400
+  is_continue_training: true
   is_muti_optimizer: true
   num_optimizer: 2
-  lr: 0.01
+  lr: 0.001
+
+alphaTao-v1.0-run:
+  is_pretrain: false
+  pretrain_steps: 5000
+  pretrain_file: 'minimax_data2.pkl'
+  optimizer_batch_size: 64
+  inference_batch_size: 64
+  replay_memory_size: 2000
+  exist_model_name: 'alphaTao-v1.0-release'
+  run_dir: 'runs\alphaTao-v1.0'
+  restore_dir: 'runs\alphaTao-v1.0'
+  exploration_factor: 1
+  is_self_play: true
+  self_play_num: 12000
+  board_size: 15
+  residual_blocks: 10
+  update_freq: 2
+  warmup_steps: 0
+  restore_epoch: 25
+  search_num: 800
+  is_continue_training: true
+  is_muti_optimizer: true
+  num_optimizer: 2
+  lr: 0.001
 alphaTao-v0.4-run:
   is_training: false
   optimizer_batch_size: 64
