@@ -401,7 +401,7 @@ def get_best_move(board: np.ndarray,
         alpha = max(alpha, best_score)
 
     r, c = best_lin // SIZE, best_lin % SIZE
-    
+    print(f"[Minimax] 落子 ({r},{c})  分值={best_score}  深度={depth}")
     # ================= 核心新增：生成策略矩阵 =================
     if return_policy:
         # 将得分转为 numpy 数组
@@ -425,7 +425,7 @@ def get_best_move(board: np.ndarray,
         return (r, c), policy_matrix
     # ==========================================================
 
-    print(f"[Minimax] 落子 ({r},{c})  分值={best_score}  深度={depth}")
+
     return (r, c)
 
 
@@ -713,6 +713,6 @@ def check_dataset_stats(pkl_path: str):
 
 if __name__ == '__main__':
     game = Minimax()
-    game.generate_games(num_games=2000, save_path="minimax_data1.pkl")
-    check_dataset_stats("minimax_data1.pkl")
+    game.generate_games(num_games=2000, save_path="minimax_data2.pkl")
+    check_dataset_stats("minimax_data2.pkl")
     # 生成 20 局，黑方深度2，白方深度2，保存到当前目录

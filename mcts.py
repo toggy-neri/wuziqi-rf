@@ -40,6 +40,9 @@ class MCTS():
         self.is_training = is_training
         self.env = env
     def search(self,node :TreeNode,batch_size=64,search_num=512,exploration_factor=1.5):
+        if node is None:
+            print("[MCTS] search got None root, skip this search")
+            return
         #create root node 
         original_board = self.env.board.copy()
         original_last_move = self.env.last_move
@@ -181,6 +184,8 @@ class MCTS():
                 for batch_pos, leaf_idx in enumerate(need_network_indices):
                     board_i  = leaf_boards[leaf_idx]
                     raw_prob = probs_batch[batch_pos]
+                    # if np.any(board_i != 0):
+                    #     raw_prob = np.where(raw_prob > 0.03, raw_prob, 0.0)
 
                     # 应用valid_mask
                     valid_mask = self.get_valid_mask(board_i, radius=2)
@@ -189,7 +194,7 @@ class MCTS():
                     if prob_sum > 1e-8:
                         raw_prob = raw_prob / prob_sum
                     else:
-                        raw_prob = valid_mask / (valid_mask.sum() + 1e-8)
+                        raw_prob = np.zeros_like(raw_prob)
 
                     network_probs[leaf_idx]  = raw_prob
                     network_values[leaf_idx] = v_net[batch_pos].item()
@@ -273,7 +278,12 @@ class MCTS():
                 if final_probs is None:
                     print(f"final_probs is empty, i={i}")
 
-                self.expand_node(leaf, leaf_boards[i], final_probs) 
+                self.expand_node(
+                    leaf,
+                    leaf_boards[i],
+                    final_probs,
+                    min_prob=0.0 if terminal_dones[i] else 1e-12
+                ) 
 
                 if(len(leaf.actions) == 0):
                     break
@@ -320,13 +330,16 @@ class MCTS():
 
             return p
     
-    def expand_node(self, node: TreeNode, board: np.ndarray, raw_probs: np.ndarray):
+    def expand_node(self, node: TreeNode, board: np.ndarray, raw_probs: np.ndarray, min_prob: float = 0.0):
         """在节点首次被访问时调用，只提取并保存合法动作及其概率"""
         # 1. 获取当前棋盘的合法位置 Mask
         valid_mask = self.get_valid_mask(board, radius=2)
         
         # 2. 找到所有合法动作的索引
-        valid_actions = np.where(valid_mask > 0)[0]
+        if min_prob > 0:
+            valid_actions = np.where((valid_mask > 0) & (raw_probs > min_prob))[0]
+        else:
+            valid_actions = np.where(valid_mask > 0)[0]
         
         # 【防御1】：如果物理上就没有合法位置（理论上不应发生，除非终局判断漏了）
         if len(valid_actions) == 0:
@@ -369,9 +382,9 @@ class MCTS():
         score = value
         v_loss = 1
         for node in reversed(path):  
-            if node.parent is not None: 
-                node.visits -= v_loss
-                node.score += 0.1
+            # if node.parent is not None: 
+            #     node.visits -= v_loss
+            #     #node.score += 0.1
             
             node.visits += 1
             node.score += score
@@ -382,6 +395,10 @@ class MCTS():
             #     node.is_terminal = False
 
     def choose(self, root_node, is_training, current_step=0):
+            if root_node is None:
+                action = self.get_fallback_action()
+                print(f"[MCTS] choose got None root, fallback action={action}")
+                return action, TreeNode(parent=None)
             actions = []
             visits = []
             valid_mask = self.get_valid_mask(self.env.board, radius=2)
@@ -394,8 +411,9 @@ class MCTS():
                 visits.append(child.visits)
                 
             if len(actions) == 0:
-                return None, None
-                raise ValueError("actions is empty")
+                action = self.get_fallback_action()
+                print(f"[MCTS] choose found no legal children, fallback action={action}")
+                return action, TreeNode(parent=None)
                 
             visits = np.array(visits, dtype=np.float64)
             
@@ -424,6 +442,15 @@ class MCTS():
                     
                 return action, legal_children[action]
 
+
+    def get_fallback_action(self):
+        valid_mask = self.get_valid_mask(self.env.board, radius=2)
+        actions = np.where(valid_mask > 0)[0]
+        if len(actions) == 0:
+            actions = np.where(self.env.board.ravel() == 0)[0]
+        if len(actions) == 0:
+            raise ValueError("[MCTS] no valid fallback actions")
+        return int(np.random.choice(actions))
 
 
     def mask_and_softmax_batch(self, policy_logits_batch):
@@ -542,10 +569,10 @@ class MCTS():
         child = node.children[best_action]
 
        # virtual loss
-        v_loss = 1
+        # v_loss = 1
 
-        child.visits += v_loss
-        child.score -= 0.1
+        # child.visits += v_loss
+        #child.score -= 0.1
 
         return best_action, child
     def debug_tree(self, node, depth=0):

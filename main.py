@@ -6,6 +6,7 @@ import yaml
 import os
 import pickle
 import json
+import random
 
 #chess GUI
 from pic import PolicyVisualizer
@@ -214,6 +215,7 @@ class Agent:
         best_loss = float('inf')
         memory_extract_var = 4
         low_policy_loss_streak = 0
+        epochs_since_var_up = 0
 
         ai_wins = 0
         minimax_wins = 0
@@ -226,7 +228,9 @@ class Agent:
             if is_training:
                 self._reset_training_data_log_if_needed(training_index)
             time_start = time.time()
+
             root = TreeNode(parent=None)
+
             game_history = []
             state = env.reset()
             done = False
@@ -234,7 +238,6 @@ class Agent:
             training_steps_log = []
             #flag = 0
             if not self.is_self_play:
-                import random
                 # 每局开始时随机分配
                 ai_player = random.choice([1, -1])
                 minimax_player = -ai_player
@@ -264,6 +267,9 @@ class Agent:
                     else:
                         #t_search = time.time()
                         #search the tree,return policy(15*15)
+                        if root is None:
+                            print("[Train] root is None before MCTS search, rebuild root")
+                            root = TreeNode(parent=None)
                         mcts.search(root,self.inference_batch_size,self.search_num,self.exploration_factor)
                         #t1 = time.time()
                         #visit_board = np.zeros((self.board_size, self.board_size))
@@ -277,9 +283,12 @@ class Agent:
                         policy = mcts.get_policy(root,self.board_size)
                         #choose the best move 
                         action,root = mcts.choose(root,is_training,current_step=current_step)
+                        if policy.sum() <= 0 and action is not None:
+                            policy[int(action)] = 1.0
                         # print(f"action: {action}",f"row: {action // self.board_size},col: {action % self.board_size}")
                         #t2 = time.time()
-                        root.parent = None
+                        if root is not None:
+                            root.parent = None
                     #step forward
                     board_before = env.board.copy()
                     step_player = env.current_player
@@ -305,9 +314,14 @@ class Agent:
                         policy = policy_matrix.flatten().astype(np.float32)
                           # minimax走法当做确定性policy，避免后面undefined
                     else:                         # 白方 = 你的AI (mcts)
+                        if root is None:
+                            print("[Train] root is None before MCTS search, rebuild root")
+                            root = TreeNode(parent=None)
                         mcts.search(root, self.inference_batch_size, self.search_num, self.exploration_factor)
                         policy = mcts.get_policy(root, self.board_size)
                         action, root = mcts.choose(root, is_training,current_step=current_step)
+                        if policy.sum() <= 0 and action is not None:
+                            policy[int(action)] = 1.0
                     #print(env.board)
                     board_before = env.board.copy()
                     step_player = env.current_player
@@ -341,6 +355,7 @@ class Agent:
                 #
                 if done:
                     winner = info["winner"]
+                    print(f"[Game End] Winner: {winner}")
                     total_games += 1
         
                     # # ================= 统计胜率 =================
@@ -383,6 +398,7 @@ class Agent:
             restore_count+=1
             current_time = datetime.now()
             time_end = time.time()
+            epochs_since_var_up += 1
             #print(f"game {i} done, time: {time_end-time_start:.3f}s")
 
             # if restore_count == 2:  # 第一次optimize后立即测试，后续添加到超参数 todo
@@ -393,20 +409,36 @@ class Agent:
 
                 if len(memory) < self.warmup_steps:
                     print(f"Memory too small ({len(memory)}), skipping training")
-                    continue
-                value_loss,policy_loss = self.optimize(memory, self.optimizer_batch_size)
-                if policy_loss < 2 and value_loss < 0.5:
-                    low_policy_loss_streak += 1
-                    if low_policy_loss_streak >= 10:
-                        memory_extract_var += 1
-                        print(f"memory_extract_var up: {memory_extract_var}")
-                        with open(self.LOG_FILE, 'a') as f:
-                            f.write(f"new best.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, now_extract_var: {memory_extract_var}\n")
-                        low_policy_loss_streak = 0
                 else:
-                    low_policy_loss_streak = 0
+                    value_loss,policy_loss = self.optimize(memory, self.optimizer_batch_size)
+                    if policy_loss < 1.5 and value_loss < 0.5:
+                        low_policy_loss_streak += 1
+                        if low_policy_loss_streak >= 10:
+                            old_var = memory_extract_var
+                            memory_extract_var += 1
+                            memory.memory.clear()
+                            epochs_since_var_up = 0
+                            print(f"memory_extract_var up: {old_var} -> {memory_extract_var}, streak reset, replay memory cleared")
+                            with open(self.LOG_FILE, 'a') as f:
+                                f.write(f"var up.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, old_extract_var: {old_var}, now_extract_var: {memory_extract_var}, policy_loss: {policy_loss:.4f}, value_loss: {value_loss:.4f}, memory_cleared: True\n")
+                            low_policy_loss_streak = 0
+                    else:
+                        low_policy_loss_streak = 0
 
                 print(f"current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}")
+
+            if epochs_since_var_up >= 500:
+                old_var = memory_extract_var
+                memory_extract_var = max(1, memory_extract_var - 1)
+                low_policy_loss_streak = 0
+                epochs_since_var_up = 0
+                msg = (
+                    f"memory_extract_var down: {old_var} -> {memory_extract_var}; "
+                    f"no var up for 200 epochs, replay memory kept"
+                )
+                print(msg)
+                with open(self.LOG_FILE, 'a') as f:
+                    f.write(f"var down.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, old_extract_var: {old_var}, now_extract_var: {memory_extract_var}, memory_cleared: False\n")
 
             # if policy_loss < best_loss:
             #     best_loss = policy_loss
@@ -645,7 +677,7 @@ class Agent:
             #illegal_prob_sum = torch.sum(log_p * occupied_mask, dim=1).mean()
             #lambda_illegal = 10.0 
             policy_loss = policy_loss_ce
-            total_loss = 5 * value_loss + policy_loss_ce + 100*illegal_prob_sum
+            total_loss = 5 * value_loss + policy_loss_ce + 1000*illegal_prob_sum
             #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
                         # =========================
             # entropy monitoring
@@ -840,7 +872,6 @@ class Agent:
         # 各取一半
         #self.network.eval()
         half = batch_size // 2
-        import random
         balanced =  memory.sample(batch_size)
         # 在 overfit_test 开始时加
         print("Target policy 非零统计:")
