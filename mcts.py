@@ -35,10 +35,12 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #MCTS algorithm
 class MCTS():
-    def __init__(self, network,env,is_training=True):
+    def __init__(self, network,env,is_training=True,use_virtual_loss=False,virtual_loss=1.0):
         self.network = network
         self.is_training = is_training
         self.env = env
+        self.use_virtual_loss = use_virtual_loss
+        self.virtual_loss = virtual_loss
     def search(self,node :TreeNode,batch_size=64,search_num=512,exploration_factor=1.5):
         if node is None:
             print("[MCTS] search got None root, skip this search")
@@ -92,9 +94,16 @@ class MCTS():
                     if next_node is None:
                         break
 
+                    if self.use_virtual_loss:
+                        self.apply_virtual_loss(next_node)
+
                     _, reward, done, info = self.env.step(action)
+                    path_len += 1
                     if done:
-                        v_terminal = 1 if info["winner"] == -self.env.current_player else -1
+                        cur_node = next_node
+                        path.append(next_node)
+                        winner = info.get("winner", None)
+                        v_terminal = 0 if winner == 0 else -1
                         break
                     # if info.get("invalid_move", False):
 
@@ -109,7 +118,6 @@ class MCTS():
                     # ✔ valid move 才前进
                     cur_node = next_node
                     path.append(cur_node)
-                    path_len += 1
 
                 #done, winner = self.env._check_win(self.env.last_move)
 
@@ -134,7 +142,7 @@ class MCTS():
                     # 占位符，后续 expand 会处理 uniform
                     rule_probs_cache[current_idx] = None 
                 
-                else:
+                elif self.is_training:
                     # 情况B：未终局，检查是否有杀棋
                     # 这里检查的是 "当前轮到谁下，谁有没有杀招"
                     win_moves = self.get_winning_moves(board_now, cur_player)
@@ -156,6 +164,9 @@ class MCTS():
                         terminal_dones[current_idx] = False
                         # --- 关键修复：只有在需要网络时才添加到 leaf_states ---
                         need_network_indices.append(current_idx)
+                else:
+                    terminal_dones[current_idx] = False
+                    need_network_indices.append(current_idx)
 
 
                 for _ in range(path_len):
@@ -380,11 +391,10 @@ class MCTS():
                        #self.walk(self.root)
     def backpropagate(self, path, value):
         score = value
-        v_loss = 1
         for node in reversed(path):  
-            # if node.parent is not None: 
-            #     node.visits -= v_loss
-            #     #node.score += 0.1
+            if self.use_virtual_loss and node.parent is not None:
+                node.visits -= 1
+                node.score -= self.virtual_loss
             
             node.visits += 1
             node.score += score
@@ -393,6 +403,10 @@ class MCTS():
             #     continue
             # if node.is_terminal:
             #     node.is_terminal = False
+
+    def apply_virtual_loss(self, node):
+        node.visits += 1
+        node.score += self.virtual_loss
 
     def choose(self, root_node, is_training, current_step=0):
             if root_node is None:
@@ -482,10 +496,20 @@ class MCTS():
             return mask.ravel()
         
         # 向量化：用最大池化膨胀occupied区域
-        from scipy.ndimage import binary_dilation
         occupied = (board != 0)
         # 生成radius大小的结构元素
-        struct = np.ones((2 * radius + 1, 2 * radius + 1), dtype=bool)
+        dilated = np.zeros_like(occupied, dtype=bool)
+        struct = None
+        def binary_dilation(occupied_board, structure=None):
+            dilated_board = np.zeros_like(occupied_board, dtype=bool)
+            occupied_rows, occupied_cols = np.where(occupied_board)
+            for row, col in zip(occupied_rows, occupied_cols):
+                r_start = max(0, row - radius)
+                r_end = min(size, row + radius + 1)
+                c_start = max(0, col - radius)
+                c_end = min(size, col + radius + 1)
+                dilated_board[r_start:r_end, c_start:c_end] = True
+            return dilated_board
         dilated = binary_dilation(occupied, structure=struct)  # 膨胀
         # 合法位置 = 膨胀后为True 且 当前为空
         valid_2d = dilated & (board == 0)
@@ -497,7 +521,7 @@ class MCTS():
         pass
     
     
-    def get_winning_moves(self, board: np.ndarray, player: int) -> np.ndarray:
+    def _get_winning_moves_windows_15(self, board: np.ndarray, player: int) -> np.ndarray:
         """
         向量化找必杀点（复用minimax里的逻辑），返回线性索引数组。
         预计算WINDOWS已在minimax模块里，直接import复用，零额外开销。
@@ -518,7 +542,34 @@ class MCTS():
         return np.unique(vw[np.arange(len(vw)), ei]) 
 
 
-    
+    def get_winning_moves(self, board: np.ndarray, player: int) -> np.ndarray:
+        size = board.shape[0]
+        winning_moves = []
+        directions = ((0, 1), (1, 0), (1, 1), (1, -1))
+
+        for action in np.flatnonzero(board.ravel() == 0):
+            row, col = divmod(int(action), size)
+            for dr, dc in directions:
+                count = 1
+
+                r, c = row + dr, col + dc
+                while 0 <= r < size and 0 <= c < size and board[r, c] == player:
+                    count += 1
+                    r += dr
+                    c += dc
+
+                r, c = row - dr, col - dc
+                while 0 <= r < size and 0 <= c < size and board[r, c] == player:
+                    count += 1
+                    r -= dr
+                    c -= dc
+
+                if count >= 5:
+                    winning_moves.append(int(action))
+                    break
+
+        return np.array(winning_moves, dtype=np.int32)
+
     def get_best_child(self, node,  is_root,c_puct=1.5):
         c_puct = 3.0 if is_root else c_puct
     
@@ -547,8 +598,9 @@ class MCTS():
             for a in actions
         ])
         #print(ss)
-        # PUCT
-        q = np.where(vs > 0, ss / (vs + 1e-6), 0.0)
+        # Child scores are stored from the child node's side-to-move perspective.
+        # Negate them so the parent evaluates each action from its own view.
+        q = np.where(vs > 0, -ss / (vs + 1e-6), 0.0)
         u = c_puct * ps * (
             np.sqrt(max(node.visits,0) + 1e-8) / (1.0 + vs)
         )
@@ -564,7 +616,6 @@ class MCTS():
 
             node.children[best_action] = TreeNode(parent=node)
 
-            node.children[best_action].p_value = ps[best_idx]
 
         child = node.children[best_action]
 
