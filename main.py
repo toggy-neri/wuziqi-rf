@@ -57,6 +57,9 @@ class Agent:
         self.is_muti_optimizer = hyperparameters['is_muti_optimizer']
         self.num_optimizer = hyperparameters['num_optimizer']
         self.lr = hyperparameters['lr']
+        self.debug_ai_minimax_board = hyperparameters.get('debug_ai_minimax_board', False)
+        self.use_virtual_loss = hyperparameters.get('use_virtual_loss', False)
+        self.virtual_loss = hyperparameters.get('virtual_loss', 1.0)
 
         #pretrain
         self.pretrainer = None
@@ -130,7 +133,28 @@ class Agent:
         }
         with open(self.TRAINING_DATA_LOG, 'a', encoding='utf-8') as f:
             f.write(json.dumps(record, ensure_ascii=False, default=self._json_default) + "\n")
-        
+
+    def _debug_print_ai_minimax_board(self, game_index, step, actor, player, action, env):
+        side = "Black" if player == 1 else "White"
+        if action is None:
+            position = "pass"
+        else:
+            row, col = divmod(int(action), self.board_size)
+            position = f"({row}, {col})"
+
+        print(
+            f"\n[AI-vs-Minimax Debug] game={game_index} step={step} "
+            f"actor={actor} side={side} action={action} pos={position}"
+        )
+        print(env.render())
+
+    def _advance_or_rebuild_root(self, root, action):
+        if root is not None and action in root.children:
+            root = root.children[action]
+            root.parent = None
+            return root
+        return TreeNode(parent=None)
+
     def run(self,is_training=True,render=False):
         #create environment
         start_time = datetime.now()
@@ -168,7 +192,14 @@ class Agent:
             else:
                 print("No memory file found, starting fresh")
         else:
-            ai_match = AiMatch(env, self.network,self.search_num,self.inference_batch_size)
+            ai_match = AiMatch(
+                env,
+                self.network,
+                self.search_num,
+                self.inference_batch_size,
+                use_virtual_loss=self.use_virtual_loss,
+                virtual_loss=self.virtual_loss,
+            )
             ai_match.run()
 
         #create network
@@ -205,7 +236,13 @@ class Agent:
 
 
         #create mcts
-        mcts = MCTS(self.network,env,is_training=self.is_training)
+        mcts = MCTS(
+            self.network,
+            env,
+            is_training=self.is_training,
+            use_virtual_loss=self.use_virtual_loss,
+            virtual_loss=self.virtual_loss,
+        )
 
         #update rate   
         sync_count = 0
@@ -213,7 +250,7 @@ class Agent:
         policy_loss = float('inf')
         value_loss = float('inf')
         best_loss = float('inf')
-        memory_extract_var = 4
+        memory_extract_var = 5
         low_policy_loss_streak = 0
         epochs_since_var_up = 0
 
@@ -312,6 +349,7 @@ class Agent:
                             depth          = 1
                         )
                         policy = policy_matrix.flatten().astype(np.float32)
+                        root = self._advance_or_rebuild_root(root, action)
                           # minimax走法当做确定性policy，避免后面undefined
                     else:                         # 白方 = 你的AI (mcts)
                         if root is None:
@@ -328,6 +366,16 @@ class Agent:
                     if env.current_player == minimax_player :
                         game_history.append((state.copy(),policy.copy(),-env.current_player,env.last_move))
                     state, reward, done, info = env.step(action)  
+                    if self.debug_ai_minimax_board:
+                        actor = "Minimax" if step_player == minimax_player else "AI"
+                        self._debug_print_ai_minimax_board(
+                            training_index,
+                            current_step,
+                            actor,
+                            step_player,
+                            action,
+                            env
+                        )
                     if is_training:
                         training_steps_log.append(
                             self._build_training_step_log(
@@ -411,7 +459,7 @@ class Agent:
                     print(f"Memory too small ({len(memory)}), skipping training")
                 else:
                     value_loss,policy_loss = self.optimize(memory, self.optimizer_batch_size)
-                    if policy_loss < 1.5 and value_loss < 0.5:
+                    if policy_loss < 2.0 and value_loss < 0.5:
                         low_policy_loss_streak += 1
                         if low_policy_loss_streak >= 10:
                             old_var = memory_extract_var

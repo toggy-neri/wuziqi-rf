@@ -23,7 +23,7 @@ class WuziqiEnv:
         self.done = False
         self.last_move = None
         #black first
-        self.current_player = -1
+        self.current_player = 1
         
     def reset(self) -> np.ndarray:
         self.board = np.zeros((self.board_size, self.board_size), dtype=np.int8)
@@ -91,7 +91,7 @@ class WuziqiEnv:
         return self.board[row, col] == 0
     
     def _check_win(self, position:int) -> Tuple[bool, int]:
-        if not position:
+        if position is None:
             return False,None
         
         row = position // self.board_size
@@ -133,9 +133,11 @@ class WuziqiEnv:
         self.black_plane[row, col] = 0
         if self.move_memory:
             self.last_move = self.move_memory[-1][0]
+        else:
+            self.last_move = None
 
         self.winner = None
-        self.current_player = -self.current_player
+        self.current_player = player
         self.is_terminal = False
         self.done = False
     
@@ -147,7 +149,7 @@ class WuziqiEnv:
         for i in range(self.board_size):
             for j in range(self.board_size):
                 if board[i, j] == 0:
-                    moves.append(15 * i + j)
+                    moves.append(self.board_size * i + j)
         return moves
     
     def get_state(self) -> np.ndarray:
