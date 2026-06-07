@@ -7,6 +7,7 @@ import os
 import pickle
 import json
 import random
+import builtins
 
 #chess GUI
 from pic import PolicyVisualizer
@@ -58,6 +59,7 @@ class Agent:
         self.num_optimizer = hyperparameters['num_optimizer']
         self.lr = hyperparameters['lr']
         self.debug_ai_minimax_board = hyperparameters.get('debug_ai_minimax_board', False)
+        self.debug_training_print = hyperparameters.get('debug_training_print', False)
         self.use_virtual_loss = hyperparameters.get('use_virtual_loss', False)
         self.virtual_loss = hyperparameters.get('virtual_loss', 1.0)
 
@@ -188,9 +190,11 @@ class Agent:
             if os.path.exists(self.MEMORY_FILE):
                 with open(self.MEMORY_FILE, 'rb') as f:
                     memory = pickle.load(f)
-                print(f"Loaded memory with {len(memory)} samples")
+                if self.debug_training_print:
+                    print(f"Loaded memory with {len(memory)} samples")
             else:
-                print("No memory file found, starting fresh")
+                if self.debug_training_print:
+                    print("No memory file found, starting fresh")
         else:
             ai_match = AiMatch(
                 env,
@@ -250,7 +254,7 @@ class Agent:
         policy_loss = float('inf')
         value_loss = float('inf')
         best_loss = float('inf')
-        memory_extract_var = 5
+        memory_extract_var = 7
         low_policy_loss_streak = 0
         epochs_since_var_up = 0
 
@@ -278,7 +282,8 @@ class Agent:
                 # 每局开始时随机分配
                 ai_player = random.choice([1, -1])
                 minimax_player = -ai_player
-                print(f"本局 AI执{'黑' if ai_player == 1 else '白'}，Minimax执{'黑' if minimax_player == 1 else '白'}")
+                if self.debug_training_print:
+                    print(f"本局 AI执{'黑' if ai_player == 1 else '白'}，Minimax执{'黑' if minimax_player == 1 else '白'}")
             while not done:
                 current_step += 1
                 #flag += 1
@@ -305,7 +310,8 @@ class Agent:
                         #t_search = time.time()
                         #search the tree,return policy(15*15)
                         if root is None:
-                            print("[Train] root is None before MCTS search, rebuild root")
+                            if self.debug_training_print:
+                                print("[Train] root is None before MCTS search, rebuild root")
                             root = TreeNode(parent=None)
                         mcts.search(root,self.inference_batch_size,self.search_num,self.exploration_factor)
                         #t1 = time.time()
@@ -353,7 +359,8 @@ class Agent:
                           # minimax走法当做确定性policy，避免后面undefined
                     else:                         # 白方 = 你的AI (mcts)
                         if root is None:
-                            print("[Train] root is None before MCTS search, rebuild root")
+                            if self.debug_training_print:
+                                print("[Train] root is None before MCTS search, rebuild root")
                             root = TreeNode(parent=None)
                         mcts.search(root, self.inference_batch_size, self.search_num, self.exploration_factor)
                         policy = mcts.get_policy(root, self.board_size)
@@ -403,7 +410,8 @@ class Agent:
                 #
                 if done:
                     winner = info["winner"]
-                    print(f"[Game End] Winner: {winner}")
+                    if self.debug_training_print:
+                        print(f"[Game End] Winner: {winner}")
                     total_games += 1
         
                     # # ================= 统计胜率 =================
@@ -456,7 +464,8 @@ class Agent:
                 
 
                 if len(memory) < self.warmup_steps:
-                    print(f"Memory too small ({len(memory)}), skipping training")
+                    if self.debug_training_print:
+                        print(f"Memory too small ({len(memory)}), skipping training")
                 else:
                     value_loss,policy_loss = self.optimize(memory, self.optimizer_batch_size)
                     if policy_loss < 2.0 and value_loss < 0.5:
@@ -466,14 +475,16 @@ class Agent:
                             memory_extract_var += 1
                             memory.memory.clear()
                             epochs_since_var_up = 0
-                            print(f"memory_extract_var up: {old_var} -> {memory_extract_var}, streak reset, replay memory cleared")
+                            if self.debug_training_print:
+                                print(f"memory_extract_var up: {old_var} -> {memory_extract_var}, streak reset, replay memory cleared")
                             with open(self.LOG_FILE, 'a') as f:
                                 f.write(f"var up.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, old_extract_var: {old_var}, now_extract_var: {memory_extract_var}, policy_loss: {policy_loss:.4f}, value_loss: {value_loss:.4f}, memory_cleared: True\n")
                             low_policy_loss_streak = 0
                     else:
                         low_policy_loss_streak = 0
 
-                print(f"current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}")
+                if self.debug_training_print:
+                    print(f"current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}")
 
             if epochs_since_var_up >= 500:
                 old_var = memory_extract_var
@@ -484,7 +495,8 @@ class Agent:
                     f"memory_extract_var down: {old_var} -> {memory_extract_var}; "
                     f"no var up for 200 epochs, replay memory kept"
                 )
-                print(msg)
+                if self.debug_training_print:
+                    print(msg)
                 with open(self.LOG_FILE, 'a') as f:
                     f.write(f"var down.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, old_extract_var: {old_var}, now_extract_var: {memory_extract_var}, memory_cleared: False\n")
 
@@ -507,6 +519,7 @@ class Agent:
 
     #optimize the network
     def optimize(self, memory, batch_size=64):
+        print = builtins.print if self.debug_training_print else (lambda *args, **kwargs: None)
         self.network.train()
         for _ in range(self.num_optimizer if self.is_muti_optimizer else 1):
             transitions = memory.sample(batch_size)
@@ -567,7 +580,8 @@ class Agent:
             batch_values  = torch.FloatTensor(aug_values).to(device).view(-1, 1)
  
             p_logits, v = self.network(batch_states)
-            print(f"v mean: {v.mean().item():.3f}, std: {v.std().item():.3f}")
+            if self.debug_training_print:
+                print(f"v mean: {v.mean().item():.3f}, std: {v.std().item():.3f}")
             print(f"V 预测值样例: {v[:5].detach().cpu().numpy().flatten()}") # 打印前5个预测值
             print(f"V 真实值样例: {batch_values[:5].cpu().numpy().flatten()}")
             value_loss = F.mse_loss(v, batch_values) 
@@ -827,16 +841,13 @@ class Agent:
                 # 1. 画单个样本的预测分布 (比如画 Batch 里的第 0 个样本)
                 sample_idx = 0
                 
-                # 1. 准备可视化数据
-                # 注意：save_board_with_heatmap 需要输入 [2, 15, 15] (黑白两通道)
-                # 直接取前两个通道
+                # Prepare board channels and policy distributions for one summary image.
                 board_vis = batch_states[sample_idx, 0:2, :, :].cpu().numpy()
                 
                 # 2. 准备概率数据 (需要 Softmax 才是概率)
-                pred_board = p_logits[sample_idx].reshape(15, 15) 
-                pred_probs = F.softmax(p_logits[sample_idx], dim=0).cpu().numpy().reshape(15, 15)
+                pred_probs = F.softmax(p_logits[sample_idx], dim=0).cpu().numpy().reshape(self.board_size, self.board_size)
                 
-                target_board = batch_actions[sample_idx].reshape(15, 15).cpu().numpy()
+                target_board = batch_actions[sample_idx].reshape(self.board_size, self.board_size).cpu().numpy()
 
                 # 3. 计算上一步位置
                 # 取第6个通道
@@ -854,32 +865,21 @@ class Agent:
                     r = coord[0].item()
                     c = coord[1].item()
                     last = (r, c)
-                    last = (r, c)
                 else:
                     print(f"Warning: No last move found in channel 6 for sample {sample_idx}")
 
                 # 2. 生成对比图 (推荐)
-                vis.save_side_by_side(
-                    pred_data=pred_board, 
-                    target_data=target_board, 
-                    table_name=f"Step", 
+                vis.save_policy_summary(
+                    pred_data=pred_probs,
+                    target_data=target_board,
+                    board_data=board_vis,
+                    probs_data=pred_probs,
+                    table_name="Step",
+                    last_move=last,
                     epoch=0
-                )
-                vis.save_heatmap(pred_board, table_name=f"Step", epoch=0)
-                # vis.save_3d_bar_grid(pred_board, table_name=f"Step", epoch=0)
-                vis.save_board_with_heatmap(
-                    board_data=board_vis, 
-                    probs_data=pred_probs, 
-                    table_name="Step", 
-                    last_move=last
                 )
 
                 # 生成纯净棋盘（查看当前局面）
-                # vis.save_raw_board(
-                #     board_data=board_vis,
-                #     table_name="Step",
-                #     last_move=last
-                # )
             # 修改打印格式
             print(
                 f"p_loss={policy_loss_ce.item():.4f} | "
