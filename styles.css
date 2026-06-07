@@ -58,7 +58,7 @@ select {
 .side-panel {
   align-self: stretch;
   display: grid;
-  grid-template-rows: auto auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto;
   gap: 18px;
   padding: 20px;
   background: var(--panel);
@@ -171,29 +171,6 @@ select {
   background: #fbfaf7;
   color: var(--ink);
   padding: 0 10px;
-}
-
-.move-list {
-  min-height: 0;
-  overflow: auto;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--panel-line);
-}
-
-.move-list li {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px solid #eee8db;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.move-list strong {
-  color: var(--ink);
 }
 
 @media (max-width: 860px) {

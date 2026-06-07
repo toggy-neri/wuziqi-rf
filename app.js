@@ -26,7 +26,6 @@ const statusEl = document.getElementById('status');
 const valueEl = document.getElementById('valueScore');
 const valueHintEl = document.getElementById('valueHint');
 const thinkEl = document.getElementById('thinkTime');
-const movesEl = document.getElementById('moves');
 const levelEl = document.getElementById('level');
 const playerColorEl = document.getElementById('playerColor');
 const blackRoleEl = document.getElementById('blackRole');
@@ -326,14 +325,6 @@ function updatePanel() {
   updateValueHint();
   thinkEl.textContent = lastThinkMs == null ? '--' : `${Math.round(lastThinkMs)}ms`;
   undoBtn.disabled = thinking || moveHistory.length === 0;
-  movesEl.innerHTML = '';
-  const recent = moveHistory.slice(-14).reverse();
-  for (const move of recent) {
-    const [row, col] = pointOf(move.action);
-    const li = document.createElement('li');
-    li.innerHTML = `<strong>${move.player === BLACK ? TEXT.black : TEXT.white}</strong><span>${row + 1}, ${col + 1}</span>`;
-    movesEl.appendChild(li);
-  }
 }
 
 function drawBoard() {
