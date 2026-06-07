@@ -35,7 +35,6 @@ class Network(nn.Module):
         self.bn_policy = nn.BatchNorm2d(16)
         self.policy_fc = nn.Linear(16*board_size*board_size, board_size*board_size)
 
-        #value head
         self.value_head = nn.Conv2d(channels, 2, kernel_size=1)
         self.bn_value   = nn.BatchNorm2d(2)          # BN放Conv后
         self.value_fc1  = nn.Linear(2*board_size*board_size, 256)  # 输入只有225
@@ -49,22 +48,15 @@ class Network(nn.Module):
         x = F.relu(self.bn_input(self.conv_input(x)))
         x = self.residual_blocks(x)
 
-        #policy output
         p = F.relu(self.bn_policy(self.policy_head(x)))
         p = p.view(-1, 16*self.board_size*self.board_size)
         p = self.policy_fc(p)
 
-        #value output
         v = self.bn_value(self.value_head(x))
         v = v.view(-1, 2*self.board_size*self.board_size)
         v = F.relu(self.value_fc1(v))
         v = torch.tanh(self.value_fc2(v))
         
-        # Value output - 解决 Relu 死亡问题
-        # v = self.bn_value(self.value_head(x))
-        # v = v.view(x.size(0), -1)
-        # v = F.leaky_relu(self.value_fc1(v)) # 确保这里没有全部死掉，或者改用 LeakyReLU
-        # v = self.value_fc2(v)   
 
         return p, v
     
@@ -131,7 +123,3 @@ def upgrade_to_128channels(model_path, new_model_path):
     torch.save(new_network.state_dict(), new_model_path)
     print(f"Saved 128-channel model to {new_model_path}")
     return new_network
-
-if __name__ == '__main__':
-    #upgrade_input_channels('runs/alphaTao-v0.5/alphaTao-v0.5.pt', 'runs/alphaTao-v0.5/alphaTao-v0.6.pt',4,8)
-    upgrade_to_128channels('runs/alphaTao-v0.6/alphaTao-v0.6.pt', 'runs/alphaTao-v0.6/alphaTao-v0.7.pt')

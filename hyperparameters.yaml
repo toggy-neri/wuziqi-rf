@@ -1,9 +1,9 @@
 alphaTao-v1.0:
   is_pretrain: false
   pretrain_steps: 5000
-  pretrain_file: 'minimax_data1.pkl'
+  pretrain_file: 'minimax_data2.pkl'
   optimizer_batch_size: 64
-  inference_batch_size: 32
+  inference_batch_size: 64
   replay_memory_size: 2000
   exist_model_name: 'alphaTao-v1.0'
   run_dir: 'runs\alphaTao-v1.0'
@@ -21,6 +21,10 @@ alphaTao-v1.0:
   is_muti_optimizer: true
   num_optimizer: 2
   lr: 0.001
+  debug_ai_minimax_board: false
+  debug_training_print: false
+  use_virtual_loss: true
+  virtual_loss: 1.0
 
 alphaTao-v1.0-run:
   is_pretrain: false
@@ -29,9 +33,11 @@ alphaTao-v1.0-run:
   optimizer_batch_size: 64
   inference_batch_size: 64
   replay_memory_size: 2000
-  exist_model_name: 'alphaTao-v1.0-release'
+  exist_model_name: 'alphaTao-v1.0'
   run_dir: 'runs\alphaTao-v1.0'
   restore_dir: 'runs\alphaTao-v1.0'
+  # exist_model_name: 'alphaTao-v1.0-release'
+  # restore_dir: 'runs\alphaTao-v1.0'
   exploration_factor: 1
   is_self_play: true
   self_play_num: 12000
@@ -40,11 +46,16 @@ alphaTao-v1.0-run:
   update_freq: 2
   warmup_steps: 0
   restore_epoch: 25
-  search_num: 800
+  search_num: 512
   is_continue_training: true
   is_muti_optimizer: true
   num_optimizer: 2
   lr: 0.001
+  debug_ai_minimax_board: false
+  debug_training_print: false
+  use_virtual_loss: true
+  virtual_loss: 1.0
+
 alphaTao-v0.4-run:
   is_training: false
   optimizer_batch_size: 64
@@ -63,6 +74,10 @@ alphaTao-v0.4-run:
   restore_epoch: 5
   search_num: 512
   is_continue_training: false
+  debug_ai_minimax_board: false
+  debug_training_print: false
+  use_virtual_loss: false
+  virtual_loss: 1.0
 
 test1:
   is_training: true
@@ -83,6 +98,10 @@ test1:
   is_continue_training: false
   is_muti_optimizer: true
   num_optimizer: 10
+  debug_ai_minimax_board: false
+  debug_training_print: false
+  use_virtual_loss: false
+  virtual_loss: 1.0
 
 test_overfit:
   is_training: true
@@ -105,6 +124,10 @@ test_overfit:
   is_muti_optimizer: true
   num_optimizer: 10
   lr: 0.0005
+  debug_ai_minimax_board: false
+  debug_training_print: false
+  use_virtual_loss: false
+  virtual_loss: 1.0
 
 test2:
   is_training: true
@@ -123,3 +146,7 @@ test2:
   update_freq: 2
   search_num: 512
   is_continue_training: true
+  debug_ai_minimax_board: false
+  debug_training_print: false
+  use_virtual_loss: false
+  virtual_loss: 1.0

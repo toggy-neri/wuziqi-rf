@@ -2,8 +2,6 @@ import numpy as np
 from typing import Tuple, Optional, List
 
 
-#Named Tuple todo  
-#todo:get latest move from the environment function
 class WuziqiEnv:
     def __init__(self, board_size: int = 15):
         self.board_size = board_size
@@ -47,8 +45,6 @@ class WuziqiEnv:
             done: 游戏是否结束
             info: 额外信息
         """
-        # if self.done:
-        #     return self.board.copy(), 0, True, {"winner": self.winner}  #在search中调用了check_win,当时赋值了self.done = True,但是未回滚
         if action is None:
             return self.board.copy(), 0, False, {"pass": True}
         row = action // self.board_size
@@ -156,32 +152,7 @@ class WuziqiEnv:
         return self.board.copy()
 
 
-    #HERE： create the channel state too frequently,be abandoned
-    # def get_channel_state(self, state: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    #     black_state = (state == 1).astype(np.float32)
-    #     white_state = (state == -1).astype(np.float32)
-    #     last_move_state = np.zeros((self.board_size, self.board_size), dtype=np.float32)
-    #     if self.last_move is not None:
-    #         row = self.last_move % self.board_size
-    #         col = self.last_move // self.board_size
-    #         last_move_state[row, col] = 1.0
-    #     current_player_state = np.full((self.board_size, self.board_size), self.current_player, dtype=np.float32)
-    #     return black_state, white_state, last_move_state, current_player_state
 
-    # def get_channel_state(self, board: np.ndarray, last_move: int,current_player: int) -> np.ndarray:
-    #     black_plane = (board == 1).astype(np.float32)
-    #     white_plane = (board == -1).astype(np.float32)
-    #     last_move_plane = np.zeros((self.board_size, self.board_size), dtype=np.float32)
-    #     if last_move is not None:
-    #         row = last_move // self.board_size
-    #         col = last_move % self.board_size
-    #         last_move_plane[row, col] = 1.0
-    #     return np.array([
-    #         black_plane,
-    #         white_plane,
-    #         last_move_plane,
-    #         self.current_player_plane[current_player]
-    #     ], dtype=np.float32)
     
     def get_channel_state(self, board: np.ndarray,  current_player: int) -> np.ndarray:
         black_plane = (board == 1).astype(np.float32)
@@ -219,7 +190,6 @@ class WuziqiEnv:
 
             history_planes.append(plane)
             
-        # 总通道数：black + white + 5步历史 + current_player = 8
         return np.array([
             black_plane,
             white_plane,

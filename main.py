@@ -1,5 +1,4 @@
 from datetime import datetime
-import sys
 import argparse
 import time
 import yaml
@@ -22,10 +21,8 @@ from pretrain import pretrainer
 
 from minimax import Minimax
 from mcts import MCTS, TreeNode
-from network import Network, Residual_block
+from network import Network
 from experience_replay import ReplayMemory
-import copy 
-from torch import nn
 from torch.nn import functional as F
 import torch
 
@@ -85,7 +82,6 @@ class Agent:
 
         self.MEMORY_FILE = os.path.join(self.restore_dir, f'{self.exist_model_name}_memory.pkl') 
         os.makedirs(self.restore_dir, exist_ok=True)
-        #self.GRAPH_FILE = os.path.join(self.run_dir, f'{hyperparameters_set}.png')
 
     def _reset_training_data_log_if_needed(self, training_index):
         if (training_index - 1) % 5 != 0:
@@ -166,11 +162,10 @@ class Agent:
 
         
         if not self.is_continue_training and is_training:
-             pass#self.network = Network(board_size=self.board_size).to(device)   
+             pass
         else:
             try:
                 self.network.load_state_dict(torch.load(self.MODEL_FILE, map_location=device))
-                #self.network = torch.load(self.MODEL_FILE).to(device)
             except:
                 raise FileNotFoundError(f"Model file {self.MODEL_FILE} not found")  
         
@@ -178,8 +173,7 @@ class Agent:
             self.pretrainer = pretrainer(self)
             memory = ReplayMemory(500000)
             self.pretrainer.pretrain(self.pretrain_file, memory, self.pretrain_steps, self.optimizer_batch_size)
-            import sys
-            sys.exit(0)
+            raise SystemExit(0)
 
 
         if is_training:
@@ -210,33 +204,30 @@ class Agent:
         if not self.is_self_play:
             minimax = Minimax(self.board_size)
         
-        self.optimizer = torch.optim.AdamW([
-    # 主干网络（共享部分）
-    {
-        "params": list(self.network.conv_input.parameters()) +
-                  list(self.network.bn_input.parameters()) +
-                  list(self.network.residual_blocks.parameters()),
-        "lr": self.lr
-    },
-
-    # policy head
-    {
-        "params": list(self.network.policy_head.parameters()) +
-                  list(self.network.bn_policy.parameters()) +
-                  list(self.network.policy_fc.parameters()),
-        "lr": self.lr
-    },
-
-    # value head 
-    {
-        "params": list(self.network.value_head.parameters()) +
-                  list(self.network.bn_value.parameters()) +
-                  list(self.network.value_fc1.parameters()) +
-                  list(self.network.value_fc2.parameters()),
-        "lr": self.lr #* 10
-    }
-
-], weight_decay=1e-4)
+        self.optimizer = torch.optim.AdamW(
+            [
+                {
+                    "params": list(self.network.conv_input.parameters())
+                    + list(self.network.bn_input.parameters())
+                    + list(self.network.residual_blocks.parameters()),
+                    "lr": self.lr,
+                },
+                {
+                    "params": list(self.network.policy_head.parameters())
+                    + list(self.network.bn_policy.parameters())
+                    + list(self.network.policy_fc.parameters()),
+                    "lr": self.lr,
+                },
+                {
+                    "params": list(self.network.value_head.parameters())
+                    + list(self.network.bn_value.parameters())
+                    + list(self.network.value_fc1.parameters())
+                    + list(self.network.value_fc2.parameters()),
+                    "lr": self.lr,
+                },
+            ],
+            weight_decay=1e-4,
+        )
 
 
         #create mcts
@@ -253,18 +244,12 @@ class Agent:
         restore_count = 0
         policy_loss = float('inf')
         value_loss = float('inf')
-        best_loss = float('inf')
         memory_extract_var = 7
         low_policy_loss_streak = 0
         epochs_since_var_up = 0
 
-        ai_wins = 0
-        minimax_wins = 0
-        draws = 0
         total_games = 0
-        #for i in range(self.self_play_num):
         for i in range(self.self_play_num):
-            #time.sleep(5)
             training_index = i + 1
             if is_training:
                 self._reset_training_data_log_if_needed(training_index)
@@ -277,7 +262,6 @@ class Agent:
             done = False
             current_step = 0
             training_steps_log = []
-            #flag = 0
             if not self.is_self_play:
                 # 每局开始时随机分配
                 ai_player = random.choice([1, -1])
@@ -286,9 +270,7 @@ class Agent:
                     print(f"本局 AI执{'黑' if ai_player == 1 else '白'}，Minimax执{'黑' if minimax_player == 1 else '白'}")
             while not done:
                 current_step += 1
-                #flag += 1
                 current_time = datetime.now()
-                #print( f"Time: {current_time.strftime(DATE_FORMAT)}")
                 if self.is_self_play or not self.is_training:
                     winning_moves = mcts.get_winning_moves(env.board, env.current_player)
                     defend_moves  = mcts.get_winning_moves(env.board, -env.current_player)
@@ -307,35 +289,20 @@ class Agent:
                         action = int(forced_moves[0])
                         root = TreeNode(parent=None)
                     else:
-                        #t_search = time.time()
-                        #search the tree,return policy(15*15)
                         if root is None:
                             if self.debug_training_print:
                                 print("[Train] root is None before MCTS search, rebuild root")
                             root = TreeNode(parent=None)
                         mcts.search(root,self.inference_batch_size,self.search_num,self.exploration_factor)
-                        #t1 = time.time()
-                        #visit_board = np.zeros((self.board_size, self.board_size))
-                        # for action, child in root.children.items():
-                        #     row = action // self.board_size
-                        #     col = action % self.board_size
-                        #     visit_board[row, col] = child.visits
-                        # print("\nRoot Children Visits:")
-                        # print(visit_board)
-                        # print(env.board)
                         policy = mcts.get_policy(root,self.board_size)
                         #choose the best move 
                         action,root = mcts.choose(root,is_training,current_step=current_step)
                         if policy.sum() <= 0 and action is not None:
                             policy[int(action)] = 1.0
-                        # print(f"action: {action}",f"row: {action // self.board_size},col: {action % self.board_size}")
-                        #t2 = time.time()
                         if root is not None:
                             root.parent = None
-                    #step forward
                     board_before = env.board.copy()
                     step_player = env.current_player
-                    # if len(forced_moves) > 0:
 
                     game_history.append((state.copy(),policy.copy(),env.current_player,env.last_move))
                     state, reward, done, info = env.step(action)  
@@ -367,7 +334,6 @@ class Agent:
                         action, root = mcts.choose(root, is_training,current_step=current_step)
                         if policy.sum() <= 0 and action is not None:
                             policy[int(action)] = 1.0
-                    #print(env.board)
                     board_before = env.board.copy()
                     step_player = env.current_player
                     if env.current_player == minimax_player :
@@ -390,61 +356,24 @@ class Agent:
                                 reward, done, info, state.copy()
                             )
                         )
-                    #print(env.board)
-                        
-                        
-                        
-                #store the game history
-                # if is_training:
-                #     now_player = env.current_player
-                #     if self.is_self_play:
-                #         game_history.append((state.copy(),policy.copy(),-now_player,env.last_move))
-                #     else:
-                #         if env.current_player == minimax_player:
-                #             game_history.append((state.copy(),policy.copy(),-now_player,env.last_move))
+
                 
-                #t3 = time.time()
-                
-                #print(f"search: {t1-t_search:.3f}s | choose: {t2-t1:.3f}s | step+copy: {t3-t2:.3f}s | flag: {flag}")
-                #print(env.board)
-                #
                 if done:
                     winner = info["winner"]
                     if self.debug_training_print:
                         print(f"[Game End] Winner: {winner}")
                     total_games += 1
         
-                    # # ================= 统计胜率 =================
-                    # if winner == 0:
-                    #     draws += 1
-                    # elif winner == minimax_player:
-                    #     minimax_wins += 1
-                    # else:
-                    #     ai_wins += 1
                         
-                    # # 打印实时胜率
-                    # if total_games % 5 == 0:  # 每5局打印一次
-                    #     ai_wr = ai_wins / total_games * 100
-                    #     mm_wr = minimax_wins / total_games * 100
-                    #     dr = draws / total_games * 100
-                    #     print(f"[对局 {total_games}] 🤖 AI胜率: {ai_wr:.1f}% ({ai_wins}胜) | 🧠 Minimax胜率: {mm_wr:.1f}% ({minimax_wins}胜) | 🤝 平局: {dr:.1f}%")
-                    # # ============================================
                     tail_count = min(len(game_history), memory_extract_var)
                     selected_history = game_history[-tail_count:] if tail_count > 0 else []
                     for s,p,player,last_move in selected_history:  #注意不要保证重名
-                        #print(s)
-                        # if not self.is_self_play:
-                        #     value = 1 if player == winner else (-1+discount)
-                        # else:
                         if winner == 0:
                             value = 0
                         else:
                             value = 1 if player == winner else -1
                         ch_state = env.get_channel_state(s,player)
-                        #print(f"Policy Max Prob: {np.max(p):.4f}, Non-zero actions: {np.count_nonzero(p)}")
                         memory.append((ch_state, p,value))
-                        # if len(memory) >= self.replay_memory_size:
-                        #     self.optimize(memory, self.optimizer_batch_size
                     if is_training:
                         self._write_training_data_log(training_index, winner, training_steps_log, time.time() - time_start)
                     game_history = []
@@ -455,11 +384,7 @@ class Agent:
             current_time = datetime.now()
             time_end = time.time()
             epochs_since_var_up += 1
-            #print(f"game {i} done, time: {time_end-time_start:.3f}s")
 
-            # if restore_count == 2:  # 第一次optimize后立即测试，后续添加到超参数 todo
-            #     self.overfit_test(memory)
-            #     import sys; sys.exit()
             if sync_count % self.update_freq == 0:
                 
 
@@ -500,11 +425,6 @@ class Agent:
                 with open(self.LOG_FILE, 'a') as f:
                     f.write(f"var down.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, old_extract_var: {old_var}, now_extract_var: {memory_extract_var}, memory_cleared: False\n")
 
-            # if policy_loss < best_loss:
-            #     best_loss = policy_loss
-            #     with open(self.LOG_FILE, 'a') as f:
-            #         f.write(f"new best.current_time: {current_time},total_time: {current_time-start_time}, Epoch {restore_count},epoch_time: {time_end-time_start:.3f}s, Policy Loss {policy_loss:.4f}, Value Loss {value_loss:.4f}\n")
-            #         torch.save(self.network.state_dict(), self.BEST_MODEL_FILE_RESTORE)
             if restore_count % self.restore_epoch == 0:
 
                 with open(self.LOG_FILE, 'a') as f:
@@ -525,29 +445,10 @@ class Agent:
             transitions = memory.sample(batch_size)
             states, actions, values = zip(*transitions)
             device = next(self.network.parameters()).device
-            # 诊断数据质量
-            # values_arr = np.array(values)
-            # print(f"Memory size: {len(memory)}")
-            # print(f"Value distribution: +1={np.sum(values_arr==1)}, -1={np.sum(values_arr==-1)}, mean={values_arr.mean():.3f}")
             
-            # nonzeros = [np.count_nonzero(a) for a in actions]
-            # print(f"Policy nonzero: min={min(nonzeros)}, max={max(nonzeros)}, mean={np.mean(nonzeros):.1f}")
             
-            # top_vals = [np.max(a) for a in actions]
-            #print(f"Policy max prob: min={min(top_vals):.3f}, max={max(top_vals):.3f}, mean={np.mean(top_vals):.3f}")
-            # for i, (s, a, v) in enumerate(transitions[:5]):
-            #     nonzero = np.count_nonzero(a)
-            #     top3 = np.argsort(a)[-3:][::-1]
 
-            #     log_text = (
-            #         f"样本{i}: "
-            #         f"非零动作数={nonzero}, "
-            #         f"top3值={a[top3]}, "
-            #         f"top3位置={top3}\n"
-            #     )
 
-                # with open(self.LOG_FILE_OPTIMIZE, 'a', encoding='utf-8') as f:
-                #     f.write(log_text)
             states = np.array(states)    # (B, 4, 15, 15)
             actions = np.array(actions)  # (B, 225)
             values = np.array(values)    # (B,)
@@ -561,7 +462,6 @@ class Agent:
                 # 旋转棋盘：state的后两个维度是棋盘(H,W)，对axis=(2,3)旋转
                 rotated_states = np.rot90(states, k=k, axes=(2, 3)).copy()
 
-                # policy也要跟着旋转：先reshape成棋盘形状，旋转，再展平
                 rotated_actions = actions.reshape(-1, self.board_size, self.board_size)
                 rotated_actions = np.rot90(rotated_actions, k=k, axes=(1, 2)).copy()
                 rotated_actions = rotated_actions.reshape(-1, self.board_size * self.board_size)
@@ -585,111 +485,6 @@ class Agent:
             print(f"V 预测值样例: {v[:5].detach().cpu().numpy().flatten()}") # 打印前5个预测值
             print(f"V 真实值样例: {batch_values[:5].cpu().numpy().flatten()}")
             value_loss = F.mse_loss(v, batch_values) 
-            #value_loss = F.mse_loss(v, batch_values)
-
-            # policy cross entropy
-            # mask = (batch_actions > 0).float()
-            # log_p = F.log_softmax(p_logits, dim=1)
-            # policy_loss = -torch.mean(
-            #     torch.sum(batch_actions * log_p * mask, dim=1)
-            # )
-
-
-
-                        # ============ 诊断：Policy 对比 ============
-            # with torch.no_grad():
-            #     pred_probs = F.softmax(p_logits, dim=1).cpu().numpy()
-            #     target_probs = batch_actions.cpu().numpy()
-                
-            #     # 随机选一个样本进行详细对比 (也可以写死 idx = 0)
-            #     idx = np.random.randint(0, pred_probs.shape[0]) 
-                
-            #     pred_p = pred_probs[idx]
-            #     target_p = target_probs[idx]
-                
-            #     top_k = 5
-            #     # 找到网络预测的 Top-K
-            #     pred_top_indices = np.argsort(pred_p)[-top_k:][::-1]
-            #     # 找到 MCTS 目标的 Top-K
-            #     target_top_indices = np.argsort(target_p)[-top_k:][::-1]
-                
-            #     print(f"\n--- 样本 {idx} Policy 对比 ---")
-            #     print(f"{'排名':<4} | {'网络预测动作 (位置)':<20} | {'MCTS目标动作 (位置)':<20}")
-            #     print("-" * 60)
-            #     for rank in range(top_k):
-            #         p_act = pred_top_indices[rank]
-            #         t_act = target_top_indices[rank]
-            #         p_row, p_col = divmod(p_act, self.board_size)
-            #         t_row, t_col = divmod(t_act, self.board_size)
-                    
-            #         p_val = pred_p[p_act]
-            #         t_val = target_p[t_act]
-                    
-            #         print(f"{rank+1:<4} | {p_val:.4f} (坐标:{p_row},{p_col})  | {t_val:.4f} (坐标:{t_row},{t_col})")
-                
-            #     # 计算这个样本的 KL 散度 (衡量两个分布的差异，0代表完全一致)
-            #     kl_div = np.sum(target_p * (np.log(target_p + 1e-10) - np.log(pred_p + 1e-10)))
-            #     print(f"样本 {idx} KL散度: {kl_div:.4f}")
-                
-            #     # 额外检查：MCTS 的最佳动作，在网络眼中排第几？
-            #     best_mcts_action = target_top_indices[0]
-            #     rank_in_pred = np.where(np.argsort(pred_p)[::-1] == best_mcts_action)[0][0] + 1
-            #     print(f"MCTS最佳动作 {best_mcts_action} 在网络预测中排第 {rank_in_pred} 位\n")
-
-            # ============ 诊断结束 ============
-            # with torch.no_grad():
-            #     # 取一个样本
-            #     idx = 1
-            #     sample_state  = batch_states[idx].cpu().numpy()   # (C,15,15)
-            #     sample_target = batch_actions[idx].cpu().numpy()  # (225,)
-                
-            #     # 计算网络的预测概率
-            #     sample_logits = p_logits[idx].cpu().numpy()
-            #     sample_pred   = F.softmax(torch.tensor(sample_logits), dim=0).numpy() # (225,)
-                
-            #     # 从state还原棋盘
-            #     board_cur = sample_state[0]   
-            #     board_opp = sample_state[1]   
-            #     board_2d  = board_cur - board_opp  # 1=当前方, -1=对手, 0=空
-                
-            #     # 1. 检测：膨胀Mask外的空位（孤岛）
-            #     valid_mask = MCTS.get_valid_mask(board_2d.astype(np.int8), radius=2)
-            #     target_nonzero = np.where(sample_target > 0)[0]
-            #     outside_mask   = target_nonzero[valid_mask[target_nonzero] == 0]
-                
-            #     # 2. 检测：已有棋子的位置（绝对非法区）
-            #     occupied_positions = np.where(board_2d.ravel() != 0)[0]
-                
-            #     # --- 综合计算 ---
-            #     # MCTS 在已有棋子上的概率总和
-            #     mcts_illegal_occupied_prob = np.sum(sample_target[occupied_positions])
-            #     # MCTS 在膨胀Mask外的概率总和
-            #     mcts_illegal_island_prob = np.sum(sample_target[valid_mask == 0])
-                
-            #     # 网络在已有棋子上的概率总和
-            #     net_illegal_occupied_prob = np.sum(sample_pred[occupied_positions])
-            #     # 网络在膨胀Mask外的概率总和
-            #     net_illegal_island_prob = np.sum(sample_pred[valid_mask == 0])
-
-            #     print(f"\n--- 样本 {idx} 综合合法性诊断 ---")
-            #     print(f"棋盘已有棋子数: {len(occupied_positions)}")
-                
-            #     print("\n[1] 已有棋子位置 (绝对非法):")
-            #     print(f"  MCTS 分配的概率总和: {mcts_illegal_occupied_prob:.6f}  (理想: 0)")
-            #     print(f"  网络 分配的概率总和: {net_illegal_occupied_prob:.6f}  (理想: 0)")
-            #     if mcts_illegal_occupied_prob > 0.001:
-            #         print("  ❌ 严重: MCTS 把概率分给了已有棋子！搜索树有Bug！")
-            #     elif net_illegal_occupied_prob > 0.1:
-            #         print("  ⚠️ 警告: MCTS没教错，但网络依然把大量概率分给了已有棋子！")
-                    
-            #     print("\n[2] 膨胀Mask外的空位 (孤岛):")
-            #     print(f"  MCTS 分配的概率总和: {mcts_illegal_island_prob:.6f}  (理想: 0)")
-            #     print(f"  网络 分配的概率总和: {net_illegal_island_prob:.6f}  (理想: 0)")
-            #     if net_illegal_island_prob > 0.5:
-            #          print("  ⚠️ 警告: 网络在到处瞎下，把超过一半的概率分给了距离棋子很远的孤岛！")
-
-            #     print("-" * 50)
-            
 
             # 2. 构建绝对非法位置的 Mask (已有棋子的地方)
             # 假设 batch_states 的前两个通道是当前方和对手方
@@ -697,146 +492,39 @@ class Agent:
             occupied_mask = (batch_states[:, 0:1, :, :] + batch_states[:, 1:2, :, :] > 0).float()
             occupied_mask = occupied_mask.view(-1, self.board_size * self.board_size) # (B, 225)
 
-            # 3. 构建孤岛位置的 Mask (膨胀范围外的空位)
-            # 注意：这里需要对 batch 中的每个棋盘计算 mask
-            # 如果 get_valid_mask 计算较慢，可以只惩罚 occupied_mask，效果已经足够好
-            # island_mask_list = []
-            # for i in range(batch_states.shape[0]):
-            #     board_cur = batch_states[i, 0].cpu().numpy()
-            #     board_opp = batch_states[i, 1].cpu().numpy()
-            #     board_2d = board_cur - board_opp
-            #     valid_m = MCTS.get_valid_mask(board_2d.astype(np.int8), radius=2)
-            #     # 孤岛 = 合法区取反
-            #     island_m = 1.0 - valid_m 
-            #     island_mask_list.append(island_m)
-            #island_mask = torch.tensor(np.stack(island_mask_list), dtype=torch.float32, device=device)
 
-            # 综合：绝对不能下的位置 = 已有棋子 OR 孤岛
-            #illegal_mask = torch.clamp(occupied_mask + island_mask, min=0.0, max=1.0)
 
-            #legal_mask = 1.0 - occupied_mask
-            # masked_p_logits = p_logits.clone()
-            # masked_p_logits = torch.where(
-            #     occupied_mask == 1.0, 
-            #     torch.full_like(p_logits, -1e9), 
-            #     p_logits
-            # )
             
             log_p = F.log_softmax(p_logits, dim=1)
-            #pred_p = F.softmax(p_logits, dim=1)
             
             
             policy_loss_ce = -torch.mean(
                 torch.sum(batch_actions * log_p, dim=1)
             )
-            # 4. 计算网络在非法区域浪费的概率
-            # pred_p shape: (B, 225)
             pred_probs = F.softmax(p_logits, dim=1)
-            # illegal_penalty = (
-            #     p_logits * occupied_mask
-            # ).pow(2).mean()
             illegal_prob_sum = torch.sum(pred_probs * occupied_mask, dim=1).mean()
-            #illegal_prob_sum = torch.sum(log_p * occupied_mask, dim=1).mean()
-            #lambda_illegal = 10.0 
             policy_loss = policy_loss_ce
             total_loss = 5 * value_loss + policy_loss_ce + 1000*illegal_prob_sum
-            #print(f"value_loss: {value_loss.item():.3f} | policy_loss: {policy_loss.item():.3f}")
-                        # =========================
-            # entropy monitoring
-            # =========================
-            # with torch.no_grad():
-            #     v_grad_norm = sum(
-            #         p.grad.norm().item() 
-            #         for n, p in self.network.named_parameters() 
-            #         if 'value' in n and p.grad is not None
-            #     )
-            #     print(f"value head grad norm: {v_grad_norm:.6f}")
-            # with torch.no_grad():
 
-            #     illegal_mass = (
-            #         pred_p * occupied_mask
-            #     ).sum(dim=1).mean()
 
-            #     legal_cnt = legal_mask.sum(dim=1).float().mean()
 
-            #     print(
-            #         f"illegal_mass={illegal_mass:.8f}"
-            #     )
 
-            #     print(
-            #         f"actual_legal_cnt={legal_cnt:.1f}"
-            #     )
-            # with torch.no_grad():
-            #     # network policy probs
-            #     pred_probs = F.softmax(masked_p_logits, dim=1)
 
-            #     # network entropy
-            #     pred_entropy = -(
-            #         pred_probs * torch.log(pred_probs + 1e-10)
-            #     ).sum(dim=1).mean()
 
-            #     # MCTS target entropy
-            #     target_entropy = -(
-            #         batch_actions * torch.log(batch_actions + 1e-10)
-            #     ).sum(dim=1).mean()
 
-            #     # ================= 新增诊断代码 =================
-            #     # 1. 计算 target (MCTS) 的动作数量和 Top-5
-            #     # batch_actions 形状是 (B, 225)
-            #     target_nonzero_counts = (batch_actions > 1e-6).sum(dim=1).float().mean() # 平均有多少个动作被赋予概率
-            #     target_top5_vals, _ = torch.topk(batch_actions, k=5, dim=1)
-            #     target_top5_mean = target_top5_vals.mean(dim=0) # 在 batch 维度求平均，得到 Top1-5 的平均概率
 
-            #     # 2. 计算 Pred (网络预测) 的动作数量和 Top-5
-            #     pred_nonzero_counts = (pred_probs > 1e-6).sum(dim=1).float().mean()
-            #     pred_top5_vals, _ = torch.topk(pred_probs, k=5, dim=1)
-            #     pred_top5_mean = pred_top5_vals.mean(dim=0)
-            #     # ==================================================
             vis = PolicyVisualizer(save_dir='./runs/policy_logs', cmap='viridis')
 
             # ... 训练循环中 ...
             with torch.no_grad():
-                # sample_idx = 0
-                # state = batch_states[sample_idx] # [8, 15, 15]
                 
-                # # === DEBUG 代码：打印 Mask 信息 ===
-                # # 1. 检查原始通道数据
-                # black_pieces = state[0] # 黑棋通道
-                # white_pieces = state[1] # 白棋通道
-                # occupied_raw = (black_pieces + white_pieces) # 有棋子的地方 > 0
                 
-                # # 2. 检查你训练代码里计算出的 occupied_mask (假设你之前重建了它)
-                # # 这里我重新生成一遍标准逻辑来对比
-                # occupied_mask_calc = (state[0] + state[1] > 0).float()
-                # occupied_mask_calc = occupied_mask_calc.view(-1) # 展平成 225 维
                 
-                # print(f"\n--- Debugging Mask for Sample {sample_idx} ---")
-                # print(f"Total Pieces on Board: {occupied_raw.sum().item()}")
-                # print(f"Occupied Mask Sum (Should be > 0): {occupied_mask_calc.sum().item()}")
                 
-                # # 3. 检查原始 logits
-                # raw_logits = p_logits[sample_idx] # [225]
-                # print(f"Raw Logits Max: {raw_logits.max().item():.4f}")
-                # print(f"Raw Logits Min: {raw_logits.min().item():.4f}")
                 
-                # # 4. 模拟 Mask 操作 (这就是你代码里干的事)
-                # masked_logits_test = torch.where(occupied_mask_calc == 1.0, torch.full_like(raw_logits, -1e9), raw_logits)
-                # print(f"Masked Logits Max: {masked_logits_test.max().item():.4f}")
-                # print(f"Masked Logits Min: {masked_logits_test.min().item():.4f}")
                 
-                # # 5. 检查 Softmax 结果
-                # probs = F.softmax(masked_logits_test, dim=0)
-                # print(f"Probs Sum (Should be 1.0): {probs.sum().item():.6f}")
                 
-                # # 6. 致命检查：有棋子的地方，概率是多少？
-                # prob_at_occupied = (probs * occupied_mask_calc).sum().item()
-                # print(f"PROBABILITY AT OCCUPIED SPOTS: {prob_at_occupied:.6f} (期望值: 0.0000)")
                 
-                # # 如果这里输出了大于 0.00001 的数字，说明 Mask 失败或者白做了
-                # if prob_at_occupied > 0.001:
-                #     print("❌ BUG CONFIRMED: AI is predicting moves on occupied spots!")
-                # else:
-                #     print("✅ Mask works in simulation, check Loss calculation.")
 
                 # 1. 画单个样本的预测分布 (比如画 Batch 里的第 0 个样本)
                 sample_idx = 0
@@ -858,7 +546,6 @@ class Agent:
                 
                 last = None
                 if last_coords.nelement() > 0:
-                    # tensor.nonzero() 返回的是 (num_points, 2)，第一维是行，第二维是列
                     coord = last_coords[0] 
                     
                     # ✅ coord 的第0个元素是行，第1个元素是列
@@ -885,17 +572,10 @@ class Agent:
                 f"p_loss={policy_loss_ce.item():.4f} | "
                 f"v_loss={value_loss.item():.4f} | "
                 f"illegal_penalty={illegal_prob_sum.item():.4f} | "
-                # f"pred_entropy={pred_entropy.item():.4f} | "
-                # f"tar_entropy={target_entropy.item():.4f} | "
-                # #f"illegal={illegal_prob_sum.item():.4f} | "
                 
                 # # 打印动作数量
-                # f"pred_cnt={pred_nonzero_counts.item():.1f} | "
-                # f"tar_cnt={target_nonzero_counts.item():.1f} | "
                 
                 # # 打印 Top-5 概率 (格式化更易读)
-                # f"pred_top5={[f'{v:.3f}' for v in pred_top5_mean.cpu().numpy()]} | "
-                # f"tar_top5={[f'{v:.3f}' for v in target_top5_mean.cpu().numpy()]}"
             )
             self.optimizer.zero_grad()
             total_loss.backward()
@@ -904,7 +584,6 @@ class Agent:
             self.optimizer.step()
         return value_loss.item(),policy_loss.item() 
     
-       # print("Memory cleared，开始自对弈")
     def overfit_test(self, memory, steps=2000,batch_size=128):
 
         
@@ -917,8 +596,6 @@ class Agent:
         
         print(f"正样本: {len(pos)}, 负样本: {len(neg)}")
         
-        # 各取一半
-        #self.network.eval()
         half = batch_size // 2
         balanced =  memory.sample(batch_size)
         # 在 overfit_test 开始时加
@@ -927,8 +604,6 @@ class Agent:
             nonzero = np.count_nonzero(a)
             top3 = np.argsort(a)[-3:][::-1]
             print(f"样本{i}: 非零动作数={nonzero}, top3值={a[top3]}, top3位置={top3}")
-        # self.network.eval()
-        #balanced = memory.sample(16)
         states, actions, values = zip(*balanced)
             
         device = next(self.network.parameters()).device
@@ -951,15 +626,9 @@ class Agent:
             
             test_optimizer.zero_grad()
             loss.backward()
-            # for name, p in self.network.named_parameters():
-            #     if 'value' in name and p.grad is not None:
-            #         print(f"{name}: grad_norm={p.grad.norm():.6f}")
             
             test_optimizer.step()
             if step % 100 == 0:
-                # print(f"V 预测值样例: {v[:5].detach().cpu().numpy().flatten()}") # 打印前5个预测值
-                # print(f"V 真实值样例: {batch_values[:5].cpu().numpy().flatten()}")
-                #print(self.network.conv_input.weight.grad.norm())
                 print(f"step {step:4d} | value_loss: {value_loss.item():.4f} | "
                     f"policy_loss: {policy_loss.item():.4f} | "
                     f"v_std: {v.std().item():.4f}")
@@ -1015,8 +684,6 @@ def main():
                        help='超参数配置文件')
     
     parser.add_argument('--train', action='store_true', help='是否训练')
-    # parser.add_argument('--board-size', type=int, default=15,
-    #                    help='棋盘大小 (默认: 15)')
     args = parser.parse_args()
     agent = Agent(args.hyperparameters,args.train)
 
@@ -1025,10 +692,6 @@ def main():
         agent.run(is_training=True,render=False)
     else:
         agent.run(is_training=False,render=True)
-    # if args.mode == 'gui':
-    #     play_gui()
-    # elif args.mode == 'test':
-    #     test_env()
 
 if __name__ == "__main__":
     main()

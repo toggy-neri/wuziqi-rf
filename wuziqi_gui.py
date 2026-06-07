@@ -242,7 +242,7 @@ class AiMatch:
         self.pending_move = None
         self.pending_ai_record = None
 
-        self.human_player = 1  #todo 设置为-1会导致下不了棋
+        self.human_player = 1
         self.ai_player = -self.human_player
         self.ai_player = -self.human_player
         self.root = TreeNode(parent=None)

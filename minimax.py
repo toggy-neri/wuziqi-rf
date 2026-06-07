@@ -401,7 +401,6 @@ def get_best_move(board: np.ndarray,
         alpha = max(alpha, best_score)
 
     r, c = best_lin // SIZE, best_lin % SIZE
-    #print(f"[Minimax] 落子 ({r},{c})  分值={best_score}  深度={depth}")
     # ================= 核心新增：生成策略矩阵 =================
     if return_policy:
         # 将得分转为 numpy 数组
@@ -505,7 +504,6 @@ class Minimax:
         r, c = move
         action = r * SIZE + c
     # 验证：env解析action的方式和这里是否一致
-        #rint(f"[DEBUG] move=({r},{c}) action={action} 反解=({action//SIZE},{action%SIZE})")
         return action, policy_matrix
     def ai_vs_minimax(self,
                       your_ai_func,
@@ -568,8 +566,6 @@ class Minimax:
                 
                 # 调用新接口，获取走步和策略
                 move, policy = get_best_move(self.board.copy(), p, depth=depth, return_policy=True)
-                # print(step)
-                # print(np.nonzero(policy))
                 if not move:
                     winner = 0 
                     break

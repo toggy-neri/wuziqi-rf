@@ -7,7 +7,6 @@ import numpy as np
 from torch.nn import functional as F
 import torch
 
-from mcts import MCTS
 from experience_replay import ReplayMemory
 from wuziqi_env import WuziqiEnv
 
@@ -29,7 +28,6 @@ class pretrainer:
             pretrain_env.reset()
             
             valid_count = 0
-            prev_move_count = 0
             all_samples = []  # 先收集所有样本再划分
 
             last_game_id = -1  # 初始化一个不可能的 game_id
@@ -96,7 +94,6 @@ class pretrainer:
                 actions = np.array(actions)
                 values  = np.array(values)
 
-                #print(np.unique(values,return_counts=True))
 
                 # 旋转增强
                 aug_states, aug_actions, aug_values = [], [], []
@@ -127,9 +124,6 @@ class pretrainer:
 
                 log_p = F.log_softmax(p_logits, dim=1)
                 policy_loss_ce = -torch.mean(torch.sum(batch_actions * log_p, dim=1))
-                # illegal_penalty = (
-                #     p_logits * occupied_mask
-                # ).pow(2).mean()
                 policy_loss = policy_loss_ce
                 pred_probs = F.softmax(p_logits, dim=1)
                 illegal_prob_sum = torch.sum(pred_probs * occupied_mask, dim=1).mean()
@@ -167,21 +161,14 @@ class pretrainer:
 
                     # 修改打印格式
                     print(
-                        #f"p_loss={policy_loss_ce.item():.4f} | "
-                        # f"v_loss={value_loss.item():.4f} | "
-                        #f"pred_H={pred_entropy.item():.4f} | "
-                        #f"tar_H={target_entropy.item():.4f} | "
                         f"illegal={illegal_prob_sum.item():.4f} | "
-                        #f"illegal_penalty={illegal_penalty.item():.4f} | "
                         f"Top5_Hit={hit.item():.3f} | "       # 新指标
                         f"Tar_Prob={target_probs.item():.3f} | "  # 新指标
                         # 打印动作数量
                         f"pred_cnt={pred_nonzero_counts.item():.1f} | "
-                        #f"tar_cnt={target_nonzero_counts.item():.1f} | "
                         
                         # 打印 Top-5 概率 (格式化更易读)
                         f"pred_top5={[f'{v:.3f}' for v in pred_top5_mean.cpu().numpy()]} | "
-                        #f"tar_top5={[f'{v:.3f}' for v in target_top5_mean.cpu().numpy()]}"
                     )
                     
                     
@@ -189,7 +176,6 @@ class pretrainer:
                         pred_entropy = -(
                             F.softmax(p_logits, dim=1) * F.log_softmax(p_logits, dim=1)
                         ).sum(dim=1).mean()
-                        #acc = (p_logits.argmax(dim=1) == batch_actions.argmax(dim=1)).float().mean()
 
                         # 验证集loss，分批避免OOM
                         val_batch_size = 64
@@ -231,7 +217,6 @@ class pretrainer:
                     with open(self.agent.LOG_FILE, 'a') as f:
                         f.write(f"current_time: {current_time}, total_time: {current_time-start_time}, "
                                 f"step {step}, train_policy {policy_loss.item():.4f}, "
-                                #f"illegal_penalty {illegal_penalty.item():.4f}, "
                                 f"val_policy {val_policy_loss:.4f}, val_value {val_value_loss:.4f}, "
                                 f"val_illegal_penalty {val_illegal_penalty:.4f}\n")
 
@@ -285,8 +270,6 @@ class pretrainer:
         opp_pos = np.argwhere(board == -current_player).tolist()
         np.random.shuffle(opp_pos)
         
-        # 切出对手的"最近3步"和"早期"
-        # 对手步数 = current_player步数 或少1步
         n_cur_total = len(all_cur)          # current已落子数（不含next_move）
         n_opp_total = len(opp_pos)
         
