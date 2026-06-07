@@ -1,0 +1,21 @@
+{
+
+    "version": "0.2.0",
+    "configurations": [
+
+
+
+        {
+            "name": "Python 调试程序: 当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "main.py",
+            "console": "integratedTerminal",
+            "args": ["alphaTao-v0.9","--train"]
+            
+        }
+    ]
+}
+
+//alphaTao-v0.4-run
+//test_overfit

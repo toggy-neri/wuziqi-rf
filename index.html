@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AlphaTao &#20116;&#23376;&#26827;</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <main class="app-shell">
+    <section class="play-surface" aria-label="&#20116;&#23376;&#26827;&#26827;&#30424;">
+      <canvas id="board" width="900" height="900"></canvas>
+    </section>
+
+    <aside class="side-panel">
+      <header class="title-block">
+        <p class="eyebrow">AlphaTao v1.0</p>
+        <h1>&#20116;&#23376;&#26827;</h1>
+        <div id="status" class="status">&#27169;&#22411;&#21152;&#36733;&#20013;</div>
+      </header>
+
+      <div class="score-strip">
+        <div>
+          <span>&#25191;&#40657;</span>
+          <strong id="blackRole">&#29609;&#23478;</strong>
+        </div>
+        <div>
+          <span>&#25191;&#30333;</span>
+          <strong id="whiteRole">AI</strong>
+        </div>
+      </div>
+
+      <label class="field">
+        <span>&#29609;&#23478;&#25191;&#23376;</span>
+        <select id="playerColor">
+          <option value="black">&#40657;&#26827;&#20808;&#25163;</option>
+          <option value="white">&#30333;&#26827;&#21518;&#25163;</option>
+        </select>
+      </label>
+
+      <div class="toolbar" aria-label="&#26827;&#23616;&#25805;&#20316;">
+        <button id="resetBtn" type="button" title="&#37325;&#26032;&#24320;&#22987;" aria-label="&#37325;&#26032;&#24320;&#22987;">
+          <i data-lucide="rotate-ccw"></i>
+        </button>
+        <button id="undoBtn" type="button" title="&#24724;&#26827;" aria-label="&#24724;&#26827;">
+          <i data-lucide="undo-2"></i>
+        </button>
+      </div>
+
+      <label class="field">
+        <span>&#24378;&#24230;</span>
+        <select id="level">
+          <option value="balanced">&#26222;&#36890;</option>
+          <option value="fast">&#24555;&#36895;</option>
+          <option value="strong">&#24378;&#21147;</option>
+        </select>
+      </label>
+
+      <div class="metrics">
+        <div>
+          <span>AI &#35270;&#35282;&#23616;&#38754;&#20540;</span>
+          <strong id="valueScore">--</strong>
+          <small id="valueHint" class="value-help">&#27491;&#20540;&#21033;&#20110; AI</small>
+        </div>
+        <div>
+          <span>&#29992;&#26102;</span>
+          <strong id="thinkTime">--</strong>
+        </div>
+      </div>
+
+      <ol id="moves" class="move-list" aria-label="&#26368;&#36817;&#33853;&#23376;"></ol>
+    </aside>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
